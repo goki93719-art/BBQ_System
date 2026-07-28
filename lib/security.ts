@@ -1,4 +1,5 @@
 const encoder = new TextEncoder();
+const PASSWORD_PBKDF2_ITERATIONS = 100_000;
 
 function toBase64(bytes: Uint8Array) {
   let binary = "";
@@ -25,16 +26,16 @@ export async function hashPassword(password: string, saltValue?: string) {
   const salt = saltValue ? fromBase64(saltValue) : crypto.getRandomValues(new Uint8Array(16));
   const key = await crypto.subtle.importKey("raw", encoder.encode(password), "PBKDF2", false, ["deriveBits"]);
   const bits = await crypto.subtle.deriveBits(
-    { name: "PBKDF2", hash: "SHA-256", salt, iterations: 120_000 },
+    { name: "PBKDF2", hash: "SHA-256", salt, iterations: PASSWORD_PBKDF2_ITERATIONS },
     key,
     256,
   );
-  return `pbkdf2$120000$${toBase64(salt)}$${toBase64(new Uint8Array(bits))}`;
+  return `pbkdf2$${PASSWORD_PBKDF2_ITERATIONS}$${toBase64(salt)}$${toBase64(new Uint8Array(bits))}`;
 }
 
 export async function verifyPassword(password: string, encoded: string) {
   const [kind, iterations, salt, expected] = encoded.split("$");
-  if (kind !== "pbkdf2" || iterations !== "120000" || !salt || !expected) return false;
+  if (kind !== "pbkdf2" || iterations !== String(PASSWORD_PBKDF2_ITERATIONS) || !salt || !expected) return false;
   const actual = await hashPassword(password, salt);
   return actual === encoded;
 }

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   assertMockConfiguration,
@@ -9,6 +10,12 @@ import {
   transitionAllowed,
   validPassword,
 } from "../lib/rules.mjs";
+
+test("password hashing stays within the Cloudflare WebCrypto PBKDF2 limit", () => {
+  const source = readFileSync(new URL("../lib/security.ts", import.meta.url), "utf8");
+  assert.match(source, /PASSWORD_PBKDF2_ITERATIONS = 100_000/);
+  assert.doesNotMatch(source, /iterations:\s*120_000/);
+});
 
 test("production refuses to run with Mock SMS enabled", () => {
   assert.throws(() => assertMockConfiguration("production", "true"), /Refusing to start/);

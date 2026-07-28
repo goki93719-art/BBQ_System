@@ -13,6 +13,10 @@ test("finished product metadata and starter cleanup are present", async () => {
   assert.match(layout, /lang="zh-CN"/);
   assert.match(page, /<GrillApp \/>/);
   assert.doesNotMatch(`${layout}\n${page}\n${packageJson}`, /codex-preview|react-loading-skeleton|SkeletonPreview/);
-  assert.deepEqual(JSON.parse(hosting), { d1: "DB", r2: null });
+  assert.deepEqual(JSON.parse(hosting), {
+    project_id: "appgprj_6a690548f4c881918d2d5cda9518de61",
+    d1: "DB",
+    r2: null,
+  });
   await assert.rejects(access(new URL("../app/_sites-preview", import.meta.url)));
 });

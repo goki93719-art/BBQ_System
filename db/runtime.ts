@@ -73,6 +73,21 @@ async function initialize() {
   await db.batch(schemaStatements.map((statement) => db.prepare(statement)));
   const seeded = await db.prepare("SELECT value FROM app_meta WHERE key = ?").bind("seed_v1").first();
   if (seeded) {
+    const securityUpdated = await db.prepare("SELECT value FROM app_meta WHERE key = ?").bind("seed_v3").first();
+    if (!securityUpdated) {
+      const now = new Date().toISOString();
+      const [customerHash, managerHash, operatorHash] = await Promise.all([
+        hashPassword("grill1234"),
+        hashPassword("Manager123"),
+        hashPassword("Operator123"),
+      ]);
+      await db.batch([
+        db.prepare("UPDATE users SET password_hash = ? WHERE id = ?").bind(customerHash, "user-demo"),
+        db.prepare("UPDATE admin_users SET password_hash = ? WHERE id = ?").bind(managerHash, "admin-manager"),
+        db.prepare("UPDATE admin_users SET password_hash = ? WHERE id = ?").bind(operatorHash, "admin-operator"),
+        db.prepare("INSERT OR REPLACE INTO app_meta VALUES (?, ?)").bind("seed_v3", now),
+      ]);
+    }
     const fixtureUpdated = await db.prepare("SELECT value FROM app_meta WHERE key = ?").bind("seed_v2").first();
     if (!fixtureUpdated) {
       const now = new Date().toISOString();
@@ -107,6 +122,7 @@ async function initialize() {
   });
   statements.push(db.prepare("INSERT OR REPLACE INTO app_meta VALUES (?, ?)").bind("seed_v1", now));
   statements.push(db.prepare("INSERT OR REPLACE INTO app_meta VALUES (?, ?)").bind("seed_v2", now));
+  statements.push(db.prepare("INSERT OR REPLACE INTO app_meta VALUES (?, ?)").bind("seed_v3", now));
   await db.batch(statements);
 }
 
