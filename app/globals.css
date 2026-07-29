@@ -220,6 +220,14 @@ h1, h2, h3, p { margin-top: 0; }
 .last-order span { padding: 5px 9px; border-radius: 999px; background: var(--fire); color: white; font-size: 11px; font-weight: 800; }
 .last-order strong { font-size: 15px; }
 .last-order small { color: var(--muted); font-size: 12px; }
+.repeat-dialog { width: min(520px, 100%); padding: 34px; border: 1px solid rgba(255,255,255,.45); border-radius: 24px; background: var(--card); box-shadow: 0 30px 90px rgba(0,0,0,.26); text-align: center; animation: modal-in .2s ease-out; }
+.repeat-icon { display: grid; width: 58px; height: 58px; margin: 0 auto 18px; place-items: center; border-radius: 18px; background: #f2e3d6; color: var(--fire-dark); font-size: 32px; font-weight: 700; }
+.repeat-dialog h2 { margin: 0 0 10px; font-family: Georgia, "Songti SC", serif; font-size: 30px; }
+.repeat-dialog > p:not(.eyebrow) { max-width: 410px; margin: 0 auto; color: var(--muted); font-size: 14px; line-height: 1.7; }
+.repeat-current { display: flex; margin: 24px 0; padding: 14px 16px; align-items: center; justify-content: space-between; border-radius: 12px; background: #f1ede4; }
+.repeat-current span { color: var(--muted); font-size: 13px; }
+.repeat-current strong { color: var(--fire-dark); font-size: 16px; }
+.repeat-dialog > footer { display: grid; grid-template-columns: .7fr 1fr 1.15fr; gap: 10px; }
 .order-list { display: grid; max-width: 830px; gap: 14px; }
 .order-card { padding: 23px; border: 1px solid var(--line); border-radius: 17px; background: var(--card); }
 .order-card > header, .order-card > footer { display: flex; align-items: center; justify-content: space-between; }
@@ -424,6 +432,13 @@ h1, h2, h3, p { margin-top: 0; }
   .option-dialog > footer { position: sticky; bottom: -18px; margin: 0 -18px -18px; padding: 14px 18px calc(14px + env(safe-area-inset-bottom)); background: var(--card); }
   .last-order { align-items: stretch; flex-direction: column; }
   .last-order button { width: 100%; }
+  .repeat-backdrop { padding: 16px; align-items: center; }
+  .repeat-dialog { padding: 28px 20px 22px; border-radius: 21px; }
+  .repeat-dialog h2 { font-size: 26px; }
+  .repeat-current { margin: 20px 0; }
+  .repeat-dialog > footer { grid-template-columns: 1fr; }
+  .repeat-dialog > footer .primary-button { grid-row: 1; }
+  .repeat-dialog > footer .outline-danger { grid-row: 2; }
   .metric-grid { grid-template-columns: 1fr; }
   .metric-grid > div { min-height: 110px; }
   .order-card > header, .order-card > footer { align-items: start; flex-direction: column; gap: 12px; }

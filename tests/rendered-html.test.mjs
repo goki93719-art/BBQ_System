@@ -15,6 +15,10 @@ test("finished product metadata and starter cleanup are present", async () => {
   assert.match(layout, /lang="zh-CN"/);
   assert.match(page, /<GrillApp \/>/);
   assert.match(app, /一键重订/);
+  assert.match(app, /替换购物车/);
+  assert.match(app, /追加到购物车/);
+  assert.match(app, /strategy === "replace"/);
+  assert.match(app, /Number\(merged\[key\]\?\.quantity \?\? 0\) \+ Number\(line\.quantity\)/);
   assert.match(app, /一键清空购物车/);
   assert.match(app, /window\.setTimeout\(onDismiss, 3000\)/);
   assert.doesNotMatch(app, /setMessage\(""\), 1500/);
@@ -40,6 +44,7 @@ test("finished product metadata and starter cleanup are present", async () => {
   assert.match(styles, /:focus-visible/);
   assert.match(styles, /font-size: 16px;/);
   assert.match(styles, /\.option-dialog/);
+  assert.match(styles, /\.repeat-dialog/);
   assert.match(styles, /\.trend-panel \{ grid-column: 1 \/ -1; \}/);
   assert.match(styles, /\.trend-tooltip/);
   assert.match(styles, /\.capacity-values button strong \{ font-size: 16px; \}/);

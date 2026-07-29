@@ -340,6 +340,8 @@ function CustomerApp({ user, onLogout }: { user: Json; onLogout: () => void }) {
   const [selectedItem, setSelectedItem] = useState<Json | null>(null);
   const [draftQuantity, setDraftQuantity] = useState(1);
   const [draftSelection, setDraftSelection] = useState<Json>({});
+  const [pendingRepeatOrder, setPendingRepeatOrder] = useState<Json | null>(null);
+  const [repeatBusy, setRepeatBusy] = useState(false);
   const dismissMessage = useCallback(() => setMessage(""), []);
 
   const loadMenu = useCallback(async (query = "") => {
@@ -364,11 +366,14 @@ function CustomerApp({ user, onLogout }: { user: Json; onLogout: () => void }) {
   useEffect(() => { if (tab === "consumption") void loadConsumption(); }, [tab, loadConsumption]);
   useEffect(() => { window.scrollTo({ top: 0 }); }, [tab]);
   useEffect(() => {
-    if (!cartOpen && !selectedItem) return;
+    if (!cartOpen && !selectedItem && !pendingRepeatOrder) return;
     const previousOverflow = document.body.style.overflow;
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       if (selectedItem) setSelectedItem(null);
+      else if (pendingRepeatOrder) {
+        if (!repeatBusy) setPendingRepeatOrder(null);
+      }
       else setCartOpen(false);
     };
     document.body.style.overflow = "hidden";
@@ -377,7 +382,7 @@ function CustomerApp({ user, onLogout }: { user: Json; onLogout: () => void }) {
       document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", closeOnEscape);
     };
-  }, [cartOpen, selectedItem]);
+  }, [cartOpen, pendingRepeatOrder, repeatBusy, selectedItem]);
   useEffect(() => {
     const refresh = () => { if (document.visibilityState === "visible") void loadMenu(searchedKeyword); };
     const timer = window.setInterval(refresh, 8000);
@@ -520,45 +525,76 @@ function CustomerApp({ user, onLogout }: { user: Json; onLogout: () => void }) {
     }
   }
 
-  async function repeatLastOrder(order: Json) {
-    const fullMenu = await api("/api/menu");
-    setMenu(fullMenu);
-    setKeyword("");
-    setSearchedKeyword("");
-    const currentMenu = new Map<string, Json>(
-      fullMenu.categories.flatMap((category: Json) => category.items).map((item: Json) => [String(item.id), item]),
-    );
-    const next: Record<string, Json> = {};
-    let skipped = 0;
-    for (const orderedItem of order.items ?? []) {
-      const item = currentMenu.get(orderedItem.item_id);
-      if (!item?.sellable) {
-        skipped += 1;
-        continue;
-      }
-      const selection = orderedItem.selection ?? {};
-      const key = cartLineKey(item.id, selection);
-      const unitPrice = priceForSelection(item.price_cent, item.business_type, selection);
-      next[key] = {
-        ...item,
-        lineKey: key,
-        selection,
-        selection_label: selectionLabel(selection),
-        price_cent: unitPrice,
-        quantity: Math.min(99, (next[key]?.quantity ?? 0) + Number(orderedItem.quantity)),
-        invalid: false,
-      };
-    }
-    if (!Object.keys(next).length) {
-      setMessage("上次订单的商品当前都不可售，先看看今日菜单吧。");
-      setTab("menu");
+  function requestRepeatOrder(order: Json) {
+    if (cartLines.length) {
+      setPendingRepeatOrder(order);
       return;
     }
-    setCart(next);
-    setQuote(null);
-    setTab("menu");
-    setCartOpen(true);
-    setMessage(skipped ? `已恢复上次订单，${skipped} 个不可售商品已跳过。` : "上次订单已放入购物车。");
+    void repeatLastOrder(order, "replace");
+  }
+
+  async function repeatLastOrder(order: Json, strategy: "replace" | "append") {
+    setRepeatBusy(true);
+    try {
+      const fullMenu = await api("/api/menu");
+      setMenu(fullMenu);
+      setKeyword("");
+      setSearchedKeyword("");
+      const currentMenu = new Map<string, Json>(
+        fullMenu.categories.flatMap((category: Json) => category.items).map((item: Json) => [String(item.id), item]),
+      );
+      const next: Record<string, Json> = {};
+      let skipped = 0;
+      for (const orderedItem of order.items ?? []) {
+        const item = currentMenu.get(orderedItem.item_id);
+        if (!item?.sellable) {
+          skipped += 1;
+          continue;
+        }
+        const selection = orderedItem.selection ?? {};
+        const key = cartLineKey(item.id, selection);
+        const unitPrice = priceForSelection(item.price_cent, item.business_type, selection);
+        next[key] = {
+          ...item,
+          lineKey: key,
+          selection,
+          selection_label: selectionLabel(selection),
+          price_cent: unitPrice,
+          quantity: Math.min(99, (next[key]?.quantity ?? 0) + Number(orderedItem.quantity)),
+          invalid: false,
+        };
+      }
+      if (!Object.keys(next).length) {
+        setMessage("上次订单的商品当前都不可售，先看看今日菜单吧。");
+        setTab("menu");
+        return;
+      }
+      setCart((current) => {
+        if (strategy === "replace") return next;
+        const merged = { ...current };
+        for (const [key, line] of Object.entries(next)) {
+          merged[key] = {
+            ...line,
+            quantity: Math.min(99, Number(merged[key]?.quantity ?? 0) + Number(line.quantity)),
+          };
+        }
+        return merged;
+      });
+      setQuote(null);
+      setTab("menu");
+      setCartOpen(true);
+      const result = strategy === "append"
+        ? "已将上次订单追加到购物车。"
+        : cartLines.length
+          ? "已用上次订单替换购物车。"
+          : "上次订单已放入购物车。";
+      setMessage(skipped ? `${result}${skipped} 个不可售商品已跳过。` : result);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "重订失败，请稍后再试");
+    } finally {
+      setPendingRepeatOrder(null);
+      setRepeatBusy(false);
+    }
   }
 
   function searchMenu(event: FormEvent) {
@@ -633,7 +669,7 @@ function CustomerApp({ user, onLogout }: { user: Json; onLogout: () => void }) {
           {orders[0] && (
             <section className="last-order">
               <div><span>上次点单</span><strong>{orders[0].order_no}</strong><small>{orders[0].items?.length ?? 0} 种 · {money(orders[0].total_cent)}</small></div>
-              <button className="primary-button" onClick={() => repeatLastOrder(orders[0])}>一键重订</button>
+              <button className="primary-button" disabled={repeatBusy} onClick={() => requestRepeatOrder(orders[0])}>{repeatBusy ? "正在加入…" : "一键重订"}</button>
             </section>
           )}
           <div className="order-list">
@@ -703,6 +739,22 @@ function CustomerApp({ user, onLogout }: { user: Json; onLogout: () => void }) {
             {!selectedItem.option_groups?.length && <div className="simple-choice">这道菜无需选择口味，直接调整份数即可。</div>}
             <div className="option-quantity"><span>数量</span><div className="stepper large"><button aria-label="减少数量" onClick={() => setDraftQuantity((value) => Math.max(1, value - 1))}>−</button><b>{draftQuantity}</b><button aria-label="增加数量" onClick={() => setDraftQuantity((value) => Math.min(99, value + 1))}>+</button></div></div>
             <footer><div><span>小计</span><strong>{money(selectedUnitPrice * draftQuantity)}</strong></div><button className="primary-button" onClick={addSelectedItem}>加入购物车</button></footer>
+          </section>
+        </div>
+      )}
+      {pendingRepeatOrder && (
+        <div className="option-backdrop repeat-backdrop" onClick={() => !repeatBusy && setPendingRepeatOrder(null)}>
+          <section className="repeat-dialog" role="dialog" aria-modal="true" aria-labelledby="repeat-dialog-title" onClick={(event) => event.stopPropagation()}>
+            <span className="repeat-icon" aria-hidden="true">↻</span>
+            <p className="eyebrow">REORDER</p>
+            <h2 id="repeat-dialog-title">购物车已有商品</h2>
+            <p>请选择如何处理上次订单。追加会保留当前商品，相同规格会自动合并数量。</p>
+            <div className="repeat-current"><span>当前购物车</span><strong>{cartCount} 件 · {money(cartTotal)}</strong></div>
+            <footer>
+              <button className="ghost-button" disabled={repeatBusy} onClick={() => setPendingRepeatOrder(null)}>取消</button>
+              <button className="outline-danger" disabled={repeatBusy} onClick={() => void repeatLastOrder(pendingRepeatOrder, "replace")}>替换购物车</button>
+              <button className="primary-button" disabled={repeatBusy} onClick={() => void repeatLastOrder(pendingRepeatOrder, "append")}>{repeatBusy ? "处理中…" : "追加到购物车"}</button>
+            </footer>
           </section>
         </div>
       )}
