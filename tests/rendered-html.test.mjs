@@ -18,8 +18,11 @@ test("finished product metadata and starter cleanup are present", async () => {
   assert.match(app, /搭配小提示/);
   assert.match(app, /option-dialog/);
   assert.match(app, /月售/);
+  assert.doesNotMatch(app, /className="attr-row"/);
+  assert.doesNotMatch(app, /每500ML/);
   assert.match(styles, /@media \(max-width: 760px\)/);
   assert.match(styles, /\.option-dialog/);
+  assert.match(styles, /\.capacity-values button strong \{ font-size: 16px; \}/);
   assert.doesNotMatch(`${layout}\n${page}\n${packageJson}`, /codex-preview|react-loading-skeleton|SkeletonPreview/);
   assert.deepEqual(JSON.parse(hosting), {
     project_id: "appgprj_6a690548f4c881918d2d5cda9518de61",

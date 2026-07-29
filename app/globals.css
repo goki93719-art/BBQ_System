@@ -118,16 +118,15 @@ h1, h2, h3, p { margin-top: 0; }
 .food-visual b { position: absolute; z-index: 2; top: 10px; left: 10px; padding: 5px 7px; border-radius: 999px; background: var(--fire); color: white; font-size: 9px; }
 .color-1 .food-visual { background: #d4d8c1; } .color-2 .food-visual { background: #e1d0b8; } .color-3 .food-visual { background: #cdd9d2; } .color-4 .food-visual { background: #d8c5bd; }
 .food-copy { display: flex; padding: 20px; flex-direction: column; justify-content: space-between; }
-.food-copy h3 { margin: 0 0 7px; font-family: Georgia, "Songti SC", serif; font-size: 19px; }
-.food-copy p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
-.attr-row { display: flex; gap: 5px; margin: 10px 0; flex-wrap: wrap; }
-.attr-row span, .chip { padding: 5px 7px; border: 0; border-radius: 6px; background: #ece8dd; color: #596053; font-size: 9px; }
-.monthly-sales { margin: 2px 0 10px; color: var(--muted); font-size: 10px; }
+.food-copy h3 { margin: 0 0 8px; font-family: Georgia, "Songti SC", serif; font-size: 22px; }
+.food-copy p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.chip { padding: 5px 7px; border: 0; border-radius: 6px; background: #ece8dd; color: #596053; font-size: 9px; }
+.monthly-sales { margin: 12px 0 14px; color: var(--muted); font-size: 12px; }
 .monthly-sales b { color: var(--ink); }
 .food-copy footer { display: flex; align-items: center; justify-content: space-between; }
-.food-copy footer strong { color: var(--fire-dark); font-size: 19px; }
-.food-copy footer strong small { color: var(--muted); font-size: 9px; }
-.food-copy footer button { min-width: 42px; height: 36px; padding: 0 10px; border: 0; border-radius: 10px; background: var(--ink); color: white; font-size: 11px; font-weight: 800; }
+.food-copy footer strong { color: var(--fire-dark); font-size: 22px; }
+.food-copy footer strong small { color: var(--muted); font-size: 11px; }
+.food-copy footer button { min-width: 46px; height: 40px; padding: 0 12px; border: 0; border-radius: 10px; background: var(--ink); color: white; font-size: 13px; font-weight: 800; }
 .food-copy footer button:disabled { font-size: 9px; }
 
 .cart-fab { position: fixed; z-index: 45; right: 28px; bottom: 24px; display: flex; min-height: 56px; padding: 0 20px 0 12px; align-items: center; gap: 9px; border: 0; border-radius: 999px; background: var(--fire); color: white; box-shadow: 0 16px 38px rgba(151,48,30,.35); }
@@ -176,10 +175,12 @@ h1, h2, h3, p { margin-top: 0; }
 .option-values { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
 .option-values button { display: grid; min-height: 48px; padding: 9px 8px; place-content: center; gap: 4px; border: 1px solid var(--line); border-radius: 11px; background: white; color: var(--muted); text-align: center; }
 .option-values button.active { border-color: var(--ink); background: var(--ink); color: white; box-shadow: 0 9px 24px rgba(31,33,29,.15); }
-.option-values button strong { font-size: 11px; }
-.option-values button small { color: inherit; font-size: 8px; line-height: 1.35; opacity: .78; }
+.option-values button strong { font-size: 13px; }
+.option-values button small { color: inherit; font-size: 10px; line-height: 1.35; opacity: .78; }
 .capacity-values { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.capacity-values button { min-height: 70px; }
+.capacity-values button { min-height: 78px; gap: 7px; }
+.capacity-values button strong { font-size: 16px; }
+.capacity-values button small { font-size: 12px; }
 .simple-choice { margin-bottom: 20px; padding: 13px; border-radius: 11px; background: #f0ece2; color: var(--muted); font-size: 11px; }
 .option-quantity { display: flex; min-height: 58px; padding: 0 2px; align-items: center; justify-content: space-between; border-top: 1px solid var(--line); }
 .stepper.large button { width: 36px; height: 36px; }

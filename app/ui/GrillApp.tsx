@@ -414,7 +414,6 @@ function CustomerApp({ user, onLogout }: { user: Json; onLogout: () => void }) {
                   <div className="food-visual"><span>{item.image_url || "🔥"}</span>{index === 0 && <b>人气</b>}</div>
                   <div className="food-copy">
                     <div><h3>{item.name}</h3><p>{item.description}</p></div>
-                    <div className="attr-row">{Object.entries(item.attrs ?? {}).slice(0, 2).map(([key, value]) => <span key={key}>{String(value)}</span>)}</div>
                     <div className="monthly-sales">月售 <b>{item.monthly_sold ?? 0}</b></div>
                     <footer><strong>{money(item.price_cent)}{item.business_type === "BEER" && <small> 起</small>}</strong><button disabled={!item.sellable} onClick={() => openItem(item)} aria-label={`选择 ${item.name}`}>{item.sellable ? "选" : item.sale_label}</button></footer>
                   </div>
@@ -492,7 +491,7 @@ function CustomerApp({ user, onLogout }: { user: Json; onLogout: () => void }) {
                   {group.values.map((option: Json) => (
                     <button key={option.value} className={draftSelection[group.key] === option.value ? "active" : ""} onClick={() => setDraftSelection((current) => ({ ...current, [group.key]: option.value }))}>
                       <strong>{option.label}</strong>
-                      {option.price_cent != null && <small>{money(option.price_cent)} · 每500ML {money(option.unit_price_per_500ml_cent)}</small>}
+                      {option.price_cent != null && <small>{money(option.price_cent)}</small>}
                     </button>
                   ))}
                 </div>
