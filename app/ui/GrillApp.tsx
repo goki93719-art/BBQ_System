@@ -1,7 +1,7 @@
 "use client";
 /* eslint-disable @typescript-eslint/no-explicit-any, react-hooks/set-state-in-effect */
 
-import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { FormEvent, PointerEvent as ReactPointerEvent, useCallback, useEffect, useRef, useState } from "react";
 import {
   cartLineKey,
   missingBalanceGroups,
@@ -59,6 +59,7 @@ function Toast({ message, tone = "dark" }: { message: string; tone?: string }) {
 
 function TrendLineChart({ rows, scope }: { rows: Json[]; scope: "year" | "month" }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [hoverPoint, setHoverPoint] = useState<{ index: number; left: number; top: number } | null>(null);
   const hasData = rows.some((row) => Number(row.amount_cent) > 0);
 
   useEffect(() => {
@@ -131,7 +132,10 @@ function TrendLineChart({ rows, scope }: { rows: Json[]; scope: "year" | "month"
       context.lineCap = "round";
       context.stroke();
 
+      const markerStep = scope === "year" ? 1 : Math.max(1, Math.ceil(rows.length / 12));
+      const peakIndex = values.indexOf(maximum);
       values.forEach((value, index) => {
+        if (index % markerStep !== 0 && index !== rows.length - 1 && index !== peakIndex) return;
         const point = pointFor(value, index);
         context.beginPath();
         context.fillStyle = "#fffdf8";
@@ -161,19 +165,60 @@ function TrendLineChart({ rows, scope }: { rows: Json[]; scope: "year" | "month"
   }, [hasData, rows, scope]);
 
   if (!hasData) return <div className="trend-empty">所选周期暂无已确认订单</div>;
+  const showHoverPoint = (event: ReactPointerEvent<HTMLCanvasElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const width = Math.max(320, Math.floor(rect.width));
+    const height = 300;
+    const padding = { top: 26, right: 22, bottom: 48, left: 66 };
+    const chartWidth = width - padding.left - padding.right;
+    const chartHeight = height - padding.top - padding.bottom;
+    const localX = (event.clientX - rect.left) * width / Math.max(1, rect.width);
+    const ratio = Math.min(1, Math.max(0, (localX - padding.left) / Math.max(1, chartWidth)));
+    const index = Math.round(ratio * Math.max(0, rows.length - 1));
+    const maximum = Math.max(1, ...rows.map((row) => Number(row.amount_cent ?? 0)));
+    const value = Number(rows[index]?.amount_cent ?? 0);
+    const x = padding.left + chartWidth * index / Math.max(1, rows.length - 1);
+    const y = padding.top + chartHeight - value / maximum * chartHeight;
+    setHoverPoint({ index, left: x / width * 100, top: y / height * 100 });
+  };
+  const formatBucket = (bucket: unknown) => {
+    const parts = String(bucket).split("-");
+    return scope === "year"
+      ? `${Number(parts[0])} 年 ${Number(parts[1])} 月`
+      : `${Number(parts[1])} 月 ${Number(parts[2])} 日`;
+  };
   const total = rows.reduce((sum, row) => sum + Number(row.amount_cent ?? 0), 0);
   const peak = rows.reduce((current, row) => Number(row.amount_cent) > Number(current?.amount_cent ?? -1) ? row : current, rows[0]);
   return (
     <div className="trend-chart">
       <div className="trend-summary">
+        <span className="trend-hint">悬浮折线查看明细</span>
         <span>周期确认金额 <strong>{money(total)}</strong></span>
         <span>峰值 <strong>{peak ? money(peak.amount_cent) : "—"}</strong></span>
       </div>
-      <canvas
-        ref={canvasRef}
-        aria-label={`${scope === "year" ? "年度月度" : "月度每日"}确认金额折线图`}
-        role="img"
-      />
+      <div className="trend-canvas-wrap">
+        <canvas
+          ref={canvasRef}
+          aria-label={`${scope === "year" ? "年度月度" : "月度每日"}确认金额折线图，悬浮可查看具体金额`}
+          onPointerDown={showHoverPoint}
+          onPointerMove={showHoverPoint}
+          onPointerLeave={() => setHoverPoint(null)}
+          onPointerCancel={() => setHoverPoint(null)}
+          role="img"
+        />
+        {hoverPoint && rows[hoverPoint.index] && <><i
+          aria-hidden="true"
+          className="trend-hover-dot"
+          style={{ left: `${hoverPoint.left}%`, top: `${hoverPoint.top}%` }}
+        /><div
+          className={`trend-tooltip ${hoverPoint.top < 20 ? "below" : ""}`}
+          role="status"
+          style={{ left: `clamp(52px, ${hoverPoint.left}%, calc(100% - 52px))`, top: `${hoverPoint.top}%` }}
+        >
+          <span>{formatBucket(rows[hoverPoint.index]?.bucket)}</span>
+          <strong>{money(rows[hoverPoint.index]?.amount_cent)}</strong>
+        </div></>}
+      </div>
     </div>
   );
 }

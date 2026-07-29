@@ -22,6 +22,8 @@ test("finished product metadata and starter cleanup are present", async () => {
   assert.match(app, /今日确认金额/);
   assert.match(app, /\[10, 20, 50\]/);
   assert.match(app, /TrendLineChart/);
+  assert.match(app, /悬浮折线查看明细/);
+  assert.match(app, /onPointerMove=\{showHoverPoint\}/);
   assert.match(app, /全年（月度汇总）/);
   assert.match(app, /option-dialog/);
   assert.match(app, /月售/);
@@ -31,6 +33,7 @@ test("finished product metadata and starter cleanup are present", async () => {
   assert.match(styles, /@media \(max-width: 760px\)/);
   assert.match(styles, /\.option-dialog/);
   assert.match(styles, /\.trend-panel \{ grid-column: 1 \/ -1; \}/);
+  assert.match(styles, /\.trend-tooltip/);
   assert.match(styles, /\.capacity-values button strong \{ font-size: 16px; \}/);
   assert.match(styles, /\.food-copy footer strong \{[^}]*font-size: 28px;/);
   assert.doesNotMatch(`${layout}\n${page}\n${packageJson}`, /codex-preview|react-loading-skeleton|SkeletonPreview/);
