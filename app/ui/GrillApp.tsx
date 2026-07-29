@@ -52,7 +52,12 @@ function Brand({ compact = false }: { compact?: boolean }) {
   );
 }
 
-function Toast({ message, tone = "dark" }: { message: string; tone?: string }) {
+function Toast({ message, tone = "dark", onDismiss }: { message: string; tone?: string; onDismiss: () => void }) {
+  useEffect(() => {
+    if (!message) return;
+    const timer = window.setTimeout(onDismiss, 3000);
+    return () => window.clearTimeout(timer);
+  }, [message, onDismiss]);
   if (!message) return null;
   return <div className={`toast toast-${tone}`} role="status">{message}</div>;
 }
@@ -335,6 +340,7 @@ function CustomerApp({ user, onLogout }: { user: Json; onLogout: () => void }) {
   const [selectedItem, setSelectedItem] = useState<Json | null>(null);
   const [draftQuantity, setDraftQuantity] = useState(1);
   const [draftSelection, setDraftSelection] = useState<Json>({});
+  const dismissMessage = useCallback(() => setMessage(""), []);
 
   const loadMenu = useCallback(async (query = "") => {
     const data = await api(`/api/menu${query ? `?keyword=${encodeURIComponent(query)}` : ""}`);
@@ -421,7 +427,6 @@ function CustomerApp({ user, onLogout }: { user: Json; onLogout: () => void }) {
     setMessage(`${selectedItem.name} × ${draftQuantity} 已加入购物车`);
     setSelectedItem(null);
     setQuote(null);
-    window.setTimeout(() => setMessage(""), 1500);
   }
 
   function changeQuantity(lineKey: string, delta: number) {
@@ -442,7 +447,6 @@ function CustomerApp({ user, onLogout }: { user: Json; onLogout: () => void }) {
     setNote("");
     setCartOpen(false);
     setMessage("购物车已清空");
-    window.setTimeout(() => setMessage(""), 1500);
   }
 
   async function submitOrder(confirmQuote = false) {
@@ -686,7 +690,7 @@ function CustomerApp({ user, onLogout }: { user: Json; onLogout: () => void }) {
           </section>
         </div>
       )}
-      <Toast message={message} tone={quote ? "warm" : "dark"} />
+      <Toast message={message} tone={quote ? "warm" : "dark"} onDismiss={dismissMessage} />
     </div>
   );
 }
@@ -727,6 +731,7 @@ function AdminApp({ admin, onLogout }: { admin: Json; onLogout: () => void }) {
   const [analyticsMonth, setAnalyticsMonth] = useState(defaultAnalyticsMonth);
   const [message, setMessage] = useState("");
   const manager = admin.role === "MANAGER";
+  const dismissMessage = useCallback(() => setMessage(""), []);
 
   const loadOrders = useCallback(async () => {
     const [pendingData, historyData] = await Promise.all([
@@ -914,7 +919,7 @@ function AdminApp({ admin, onLogout }: { admin: Json; onLogout: () => void }) {
 
         {tab === "audit" && <><div className="admin-title"><div><p className="eyebrow">AUDIT TRAIL</p><h1>审计日志</h1><p>管理写操作与订单状态变化不可物理删除。</p></div><button className="ghost-button" onClick={loadAudits}>刷新</button></div><section className="admin-panel compact-table audit-table">{audits.map((log) => <div className="table-row" key={log.id}><span><b>{log.action}</b><small>{log.entity_type} · {log.entity_id.slice(0, 12)}</small></span><span>{log.actor_name}<small>{log.actor_type}</small></span><span>{log.reason || "—"}</span><time>{dateTime(log.created_at)}</time></div>)}</section></>}
       </main>
-      <Toast message={message} />
+      <Toast message={message} onDismiss={dismissMessage} />
     </div>
   );
 }
