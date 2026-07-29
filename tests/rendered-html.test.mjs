@@ -18,6 +18,9 @@ test("finished product metadata and starter cleanup are present", async () => {
   assert.match(app, /一键清空购物车/);
   assert.match(app, /window\.setTimeout\(onDismiss, 3000\)/);
   assert.doesNotMatch(app, /setMessage\(""\), 1500/);
+  assert.match(app, /event\.key !== "Escape"/);
+  assert.match(app, /role="dialog" aria-modal="true" aria-label="购物车"/);
+  assert.match(app, /aria-label="顾客端主导航"/);
   assert.match(app, /搭配小提示/);
   assert.match(app, /近一年订单记录/);
   assert.match(app, /今日待处理/);
@@ -34,6 +37,8 @@ test("finished product metadata and starter cleanup are present", async () => {
   assert.doesNotMatch(app, /每500ML/);
   assert.doesNotMatch(app, /空桶补 0|mini-bars|admin-period/);
   assert.match(styles, /@media \(max-width: 760px\)/);
+  assert.match(styles, /:focus-visible/);
+  assert.match(styles, /font-size: 16px;/);
   assert.match(styles, /\.option-dialog/);
   assert.match(styles, /\.trend-panel \{ grid-column: 1 \/ -1; \}/);
   assert.match(styles, /\.trend-tooltip/);

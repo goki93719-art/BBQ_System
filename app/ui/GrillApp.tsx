@@ -362,6 +362,22 @@ function CustomerApp({ user, onLogout }: { user: Json; onLogout: () => void }) {
 
   useEffect(() => { void loadMenu(); void loadOrders(); }, [loadMenu, loadOrders]);
   useEffect(() => { if (tab === "consumption") void loadConsumption(); }, [tab, loadConsumption]);
+  useEffect(() => { window.scrollTo({ top: 0 }); }, [tab]);
+  useEffect(() => {
+    if (!cartOpen && !selectedItem) return;
+    const previousOverflow = document.body.style.overflow;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      if (selectedItem) setSelectedItem(null);
+      else setCartOpen(false);
+    };
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [cartOpen, selectedItem]);
   useEffect(() => {
     const refresh = () => { if (document.visibilityState === "visible") void loadMenu(searchedKeyword); };
     const timer = window.setInterval(refresh, 8000);
@@ -575,10 +591,10 @@ function CustomerApp({ user, onLogout }: { user: Json; onLogout: () => void }) {
     <div className="customer-shell">
       <header className="customer-header">
         <Brand compact />
-        <nav>
-          <button className={tab === "menu" ? "active" : ""} onClick={() => setTab("menu")}>今日菜单</button>
-          <button className={tab === "orders" ? "active" : ""} onClick={() => { setTab("orders"); void loadOrders(); }}>我的订单</button>
-          <button className={tab === "consumption" ? "active" : ""} onClick={() => setTab("consumption")}>消费记录</button>
+        <nav aria-label="顾客端主导航">
+          <button aria-current={tab === "menu" ? "page" : undefined} className={tab === "menu" ? "active" : ""} onClick={() => setTab("menu")}>今日菜单</button>
+          <button aria-current={tab === "orders" ? "page" : undefined} className={tab === "orders" ? "active" : ""} onClick={() => { setTab("orders"); void loadOrders(); }}>我的订单</button>
+          <button aria-current={tab === "consumption" ? "page" : undefined} className={tab === "consumption" ? "active" : ""} onClick={() => setTab("consumption")}>消费记录</button>
         </nav>
         <div className="user-chip"><span>{user.nickname?.slice(0, 1)}</span><div><strong>{user.nickname}</strong><small>{user.phone_masked}</small></div><button onClick={logout}>退出</button></div>
       </header>
@@ -592,7 +608,7 @@ function CustomerApp({ user, onLogout }: { user: Json; onLogout: () => void }) {
           <section className="menu-section">
             <div className="section-heading"><div><p className="eyebrow">OUR MENU</p><h2>趁热挑，慢慢吃</h2></div><form className="menu-search" onSubmit={searchMenu}><input value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="搜索菜名、口味、标签" aria-label="搜索菜单" /><button>搜索</button>{searchedKeyword && <button type="button" onClick={clearSearch}>清除</button>}</form></div>
             <div className="category-tabs">
-              {menu.categories.map((category: Json) => <button key={category.id} className={activeCategory?.id === category.id ? "active" : ""} onClick={() => setCategoryId(category.id)}>{category.name}<small>{category.items.length}</small></button>)}
+              {menu.categories.map((category: Json) => <button key={category.id} aria-pressed={activeCategory?.id === category.id} className={activeCategory?.id === category.id ? "active" : ""} onClick={() => setCategoryId(category.id)}>{category.name}<small>{category.items.length}</small></button>)}
             </div>
             <div className="item-grid">
               {searchedKeyword && !activeCategory && <div className="empty-state">没有找到“{searchedKeyword}”，换个关键词试试。</div>}
@@ -602,7 +618,7 @@ function CustomerApp({ user, onLogout }: { user: Json; onLogout: () => void }) {
                   <div className="food-copy">
                     <div><h3>{item.name}</h3><p>{item.description}</p></div>
                     <div className="monthly-sales">月售 <b>{item.monthly_sold ?? 0}</b></div>
-                    <footer><strong>{money(item.price_cent)}{item.business_type === "BEER" && <small> 起</small>}</strong><button disabled={!item.sellable} onClick={() => openItem(item)} aria-label={`选择 ${item.name}`}>{item.sellable ? "选" : item.sale_label}</button></footer>
+                    <footer><strong>{money(item.price_cent)}{item.business_type === "BEER" && <small> 起</small>}</strong><button disabled={!item.sellable} onClick={() => openItem(item)} aria-label={`选择 ${item.name}`}>{item.sellable ? "选择" : item.sale_label}</button></footer>
                   </div>
                 </article>
               ))}
@@ -636,7 +652,7 @@ function CustomerApp({ user, onLogout }: { user: Json; onLogout: () => void }) {
       {tab === "consumption" && (
         <main className="content-page">
           <div className="page-title"><p className="eyebrow">MY TASTE</p><h1>消费记录</h1><p>这里只统计已确认、未作废的订单。</p></div>
-          <div className="period-tabs">{["today", "week", "month", "year"].map((value) => <button key={value} className={period === value ? "active" : ""} onClick={() => setPeriod(value)}>{{ today: "今日", week: "本周", month: "本月", year: "本年" }[value]}</button>)}</div>
+          <div className="period-tabs" aria-label="消费记录周期">{["today", "week", "month", "year"].map((value) => <button key={value} aria-pressed={period === value} className={period === value ? "active" : ""} onClick={() => setPeriod(value)}>{{ today: "今日", week: "本周", month: "本月", year: "本年" }[value]}</button>)}</div>
           <div className="metric-grid">
             <div><span>确认金额</span><strong>{money(consumption.summary?.amount_cent)}</strong><small>不代表已支付</small></div>
             <div><span>订单数</span><strong>{consumption.summary?.order_count ?? 0}</strong><small>已确认未作废</small></div>
@@ -646,14 +662,14 @@ function CustomerApp({ user, onLogout }: { user: Json; onLogout: () => void }) {
         </main>
       )}
 
-      <button className="cart-fab" onClick={() => setCartOpen(true)}><span>🛒</span><b>{cartCount || 0}</b><strong>{cartCount ? `${money(cartTotal)} · 去结算` : "购物车"}</strong></button>
+      <button className="cart-fab" aria-label={`打开购物车，当前 ${cartCount} 件商品`} onClick={() => setCartOpen(true)}><span>🛒</span><b>{cartCount || 0}</b><strong>{cartCount ? `${money(cartTotal)} · 去结算` : "购物车"}</strong></button>
       {cartOpen && (
         <div className="drawer-backdrop" onClick={() => setCartOpen(false)}>
-          <aside className="cart-drawer" onClick={(event) => event.stopPropagation()}>
+          <aside className="cart-drawer" role="dialog" aria-modal="true" aria-label="购物车" onClick={(event) => event.stopPropagation()}>
             <header><div><p className="eyebrow">YOUR CART</p><h2>购物车</h2></div><div className="cart-header-actions">{!!cartLines.length && <button className="clear-cart" aria-label="一键清空购物车" onClick={clearCart}>清空</button>}<button className="cart-close" aria-label="关闭购物车" onClick={() => setCartOpen(false)}>×</button></div></header>
             <div className="cart-lines">
               {!cartLines.length && <div className="empty-state">还没选好吃的，去菜单逛逛。</div>}
-              {cartLines.map((line) => <div className={`cart-line ${line.invalid ? "invalid" : ""}`} key={line.lineKey}><span className="cart-icon">{line.image_url}</span><div><strong>{line.name}</strong>{line.selection_label && <em>{line.selection_label}</em>}<small>{line.invalid ? `失效：${line.invalidReason}` : money(line.price_cent)}</small>{line.invalid && <button className="remove-invalid" onClick={() => changeQuantity(line.lineKey, -line.quantity)}>移除失效商品</button>}</div><div className="stepper"><button disabled={line.invalid} onClick={() => changeQuantity(line.lineKey, -1)}>−</button><b>{line.quantity}</b><button disabled={line.invalid} onClick={() => changeQuantity(line.lineKey, 1)}>+</button></div></div>)}
+              {cartLines.map((line) => <div className={`cart-line ${line.invalid ? "invalid" : ""}`} key={line.lineKey}><span className="cart-icon">{line.image_url}</span><div><strong>{line.name}</strong>{line.selection_label && <em>{line.selection_label}</em>}<small>{line.invalid ? `失效：${line.invalidReason}` : money(line.price_cent)}</small>{line.invalid && <button className="remove-invalid" onClick={() => changeQuantity(line.lineKey, -line.quantity)}>移除失效商品</button>}</div><div className="stepper"><button aria-label={`减少一份${line.name}`} disabled={line.invalid} onClick={() => changeQuantity(line.lineKey, -1)}>−</button><b>{line.quantity}</b><button aria-label={`增加一份${line.name}`} disabled={line.invalid} onClick={() => changeQuantity(line.lineKey, 1)}>+</button></div></div>)}
             </div>
             <label className="note-field">订单备注<textarea value={note} onChange={(event) => setNote(event.target.value)} maxLength={200} placeholder="例如：少辣、不要香菜" /></label>
             {!!cartLines.length && (
@@ -676,7 +692,7 @@ function CustomerApp({ user, onLogout }: { user: Json; onLogout: () => void }) {
                 <legend>{group.label}</legend>
                 <div className={`option-values ${group.key === "capacity" ? "capacity-values" : ""}`}>
                   {group.values.map((option: Json) => (
-                    <button key={option.value} className={draftSelection[group.key] === option.value ? "active" : ""} onClick={() => setDraftSelection((current) => ({ ...current, [group.key]: option.value }))}>
+                    <button key={option.value} aria-pressed={draftSelection[group.key] === option.value} className={draftSelection[group.key] === option.value ? "active" : ""} onClick={() => setDraftSelection((current) => ({ ...current, [group.key]: option.value }))}>
                       <strong>{option.label}</strong>
                       {option.price_cent != null && <small>{money(option.price_cent)}</small>}
                     </button>
@@ -685,7 +701,7 @@ function CustomerApp({ user, onLogout }: { user: Json; onLogout: () => void }) {
               </fieldset>
             ))}
             {!selectedItem.option_groups?.length && <div className="simple-choice">这道菜无需选择口味，直接调整份数即可。</div>}
-            <div className="option-quantity"><span>数量</span><div className="stepper large"><button onClick={() => setDraftQuantity((value) => Math.max(1, value - 1))}>−</button><b>{draftQuantity}</b><button onClick={() => setDraftQuantity((value) => Math.min(99, value + 1))}>+</button></div></div>
+            <div className="option-quantity"><span>数量</span><div className="stepper large"><button aria-label="减少数量" onClick={() => setDraftQuantity((value) => Math.max(1, value - 1))}>−</button><b>{draftQuantity}</b><button aria-label="增加数量" onClick={() => setDraftQuantity((value) => Math.min(99, value + 1))}>+</button></div></div>
             <footer><div><span>小计</span><strong>{money(selectedUnitPrice * draftQuantity)}</strong></div><button className="primary-button" onClick={addSelectedItem}>加入购物车</button></footer>
           </section>
         </div>
@@ -775,6 +791,7 @@ function AdminApp({ admin, onLogout }: { admin: Json; onLogout: () => void }) {
     };
   }, [loadOrders]);
   useEffect(() => { if (tab === "menu") void loadMenu(); if (tab === "analytics") void loadAnalytics(); if (tab === "audit") void loadAudits(); }, [tab, loadMenu, loadAnalytics, loadAudits]);
+  useEffect(() => { window.scrollTo({ top: 0 }); }, [tab]);
 
   const pending = pendingOrders;
 
@@ -848,11 +865,11 @@ function AdminApp({ admin, onLogout }: { admin: Json; onLogout: () => void }) {
       <aside className="admin-sidebar">
         <Brand compact />
         <div className="store-open"><i />营业中<small>Asia/Shanghai</small></div>
-        <nav>
-          <button className={tab === "orders" ? "active" : ""} onClick={() => setTab("orders")}><span>▤</span>订单中心{pending.length > 0 && <b>{pending.length}</b>}</button>
-          <button className={tab === "menu" ? "active" : ""} onClick={() => setTab("menu")}><span>◫</span>菜单管理</button>
-          {manager && <button className={tab === "analytics" ? "active" : ""} onClick={() => setTab("analytics")}><span>↗</span>经营分析</button>}
-          {manager && <button className={tab === "audit" ? "active" : ""} onClick={() => setTab("audit")}><span>◎</span>审计日志</button>}
+        <nav aria-label="门店管理主导航">
+          <button aria-current={tab === "orders" ? "page" : undefined} className={tab === "orders" ? "active" : ""} onClick={() => setTab("orders")}><span>▤</span>订单中心{pending.length > 0 && <b>{pending.length}</b>}</button>
+          <button aria-current={tab === "menu" ? "page" : undefined} className={tab === "menu" ? "active" : ""} onClick={() => setTab("menu")}><span>◫</span>菜单管理</button>
+          {manager && <button aria-current={tab === "analytics" ? "page" : undefined} className={tab === "analytics" ? "active" : ""} onClick={() => setTab("analytics")}><span>↗</span>经营分析</button>}
+          {manager && <button aria-current={tab === "audit" ? "page" : undefined} className={tab === "audit" ? "active" : ""} onClick={() => setTab("audit")}><span>◎</span>审计日志</button>}
         </nav>
         <div className="admin-profile"><span>{admin.display_name.slice(0, 1)}</span><div><strong>{admin.display_name}</strong><small>{manager ? "店长" : "操作员"}</small></div><button onClick={logout}>退出</button></div>
       </aside>
@@ -889,8 +906,8 @@ function AdminApp({ admin, onLogout }: { admin: Json; onLogout: () => void }) {
 
         {tab === "menu" && <>
           <div className="admin-title"><div><p className="eyebrow">MENU CONTROL</p><h1>菜单管理</h1><p>店长操作会写入审计日志，历史订单始终保留快照。</p></div>{manager && <span className="button-row"><button className="ghost-button" onClick={addCategory}>新增品类</button><button className="primary-button" onClick={addItem}>新增商品</button></span>}</div>
-          <section className="admin-panel"><header><h2>品类</h2><span>{categories.length} 个品类</span></header><div className="category-admin-grid">{categories.map((category) => <div key={category.id}><span className="category-icon">{category.name.slice(0, 1)}</span><span><strong>{category.name}</strong><small>{category.code} · V{category.version}</small></span><button disabled={!manager} onClick={() => toggleCategory(category)} className={category.status === "ENABLED" ? "switch on" : "switch"}><i /></button></div>)}</div></section>
-          <section className="admin-panel compact-table"><header><h2>商品</h2><span>{items.length} 道在库商品</span></header>{items.map((item) => <div className="table-row menu-row" key={item.id}><span className="table-food">{item.image_url}</span><span><b>{item.name}</b><small>{item.category_name} · {item.sku}</small></span><strong>{money(item.price_cent)}</strong><button disabled={!manager} className={item.sold_out ? "chip danger" : "chip"} onClick={() => toggleItem(item, "soldOut")}>{item.sold_out ? "已售罄" : "有库存"}</button><button disabled={!manager} className={item.status === "ACTIVE" ? "switch on" : "switch"} onClick={() => toggleItem(item, "status")}><i /></button></div>)}</section>
+          <section className="admin-panel"><header><h2>品类</h2><span>{categories.length} 个品类</span></header><div className="category-admin-grid">{categories.map((category) => <div key={category.id}><span className="category-icon">{category.name.slice(0, 1)}</span><span><strong>{category.name}</strong><small>{category.code} · V{category.version}</small></span><button aria-label={`${category.status === "ENABLED" ? "停用" : "启用"}品类${category.name}`} aria-pressed={category.status === "ENABLED"} disabled={!manager} onClick={() => toggleCategory(category)} className={category.status === "ENABLED" ? "switch on" : "switch"}><i /></button></div>)}</div></section>
+          <section className="admin-panel compact-table"><header><h2>商品</h2><span>{items.length} 道在库商品</span></header>{items.map((item) => <div className="table-row menu-row" key={item.id}><span className="table-food">{item.image_url}</span><span><b>{item.name}</b><small>{item.category_name} · {item.sku}</small></span><strong>{money(item.price_cent)}</strong><button aria-pressed={item.sold_out} disabled={!manager} className={item.sold_out ? "chip danger" : "chip"} onClick={() => toggleItem(item, "soldOut")}>{item.sold_out ? "已售罄" : "有库存"}</button><button aria-label={`${item.status === "ACTIVE" ? "下架" : "上架"}${item.name}`} aria-pressed={item.status === "ACTIVE"} disabled={!manager} className={item.status === "ACTIVE" ? "switch on" : "switch"} onClick={() => toggleItem(item, "status")}><i /></button></div>)}</section>
         </>}
 
         {tab === "analytics" && <>
@@ -937,13 +954,14 @@ export function GrillApp() {
       setLoading(false);
     });
   }, []);
+  useEffect(() => { window.scrollTo({ top: 0 }); }, [mode]);
 
   if (loading) return <div className="launch-screen"><Brand /><div className="launch-line"><i /></div><p>炭火正在升温…</p></div>;
   return (
     <>
       <div className="mode-switch" aria-label="切换顾客端与管理端">
-        <button className={mode === "customer" ? "active" : ""} onClick={() => setMode("customer")}>顾客点餐</button>
-        <button className={mode === "admin" ? "active" : ""} onClick={() => setMode("admin")}>门店管理</button>
+        <button aria-pressed={mode === "customer"} className={mode === "customer" ? "active" : ""} onClick={() => setMode("customer")}>顾客点餐</button>
+        <button aria-pressed={mode === "admin"} className={mode === "admin" ? "active" : ""} onClick={() => setMode("admin")}>门店管理</button>
       </div>
       {mode === "customer"
         ? customer ? <CustomerApp user={customer} onLogout={() => setCustomer(null)} /> : <CustomerAuth onLogin={setCustomer} />
