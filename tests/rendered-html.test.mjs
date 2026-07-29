@@ -32,6 +32,7 @@ test("finished product metadata and starter cleanup are present", async () => {
   assert.match(styles, /\.option-dialog/);
   assert.match(styles, /\.trend-panel \{ grid-column: 1 \/ -1; \}/);
   assert.match(styles, /\.capacity-values button strong \{ font-size: 16px; \}/);
+  assert.match(styles, /\.food-copy footer strong \{[^}]*font-size: 28px;/);
   assert.doesNotMatch(`${layout}\n${page}\n${packageJson}`, /codex-preview|react-loading-skeleton|SkeletonPreview/);
   assert.deepEqual(JSON.parse(hosting), {
     project_id: "appgprj_6a690548f4c881918d2d5cda9518de61",
