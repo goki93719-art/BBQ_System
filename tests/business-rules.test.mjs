@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   assertMockConfiguration,
   businessDate,
+  businessDayStartUtc,
   canonicalCart,
   inSalePeriods,
   normalizePhone,
@@ -96,4 +97,11 @@ test("sale periods are half-open and support crossing midnight", () => {
   assert.equal(inSalePeriods(period, new Date("2026-07-27T17:59:00Z")), true);
   assert.equal(inSalePeriods(period, new Date("2026-07-27T18:00:00Z")), false);
   assert.equal(businessDate(new Date("2026-07-27T16:30:00Z")), "2026-07-28");
+});
+
+test("pending orders expire at the next Asia/Shanghai calendar day", () => {
+  assert.equal(businessDayStartUtc(new Date("2026-07-29T15:59:59Z")), "2026-07-28T16:00:00.000Z");
+  assert.equal(businessDayStartUtc(new Date("2026-07-29T16:00:00Z")), "2026-07-29T16:00:00.000Z");
+  assert.ok("2026-07-29T15:59:59.999Z" < businessDayStartUtc(new Date("2026-07-29T16:00:00Z")));
+  assert.ok(!("2026-07-29T16:00:00.000Z" < businessDayStartUtc(new Date("2026-07-29T16:00:00Z"))));
 });

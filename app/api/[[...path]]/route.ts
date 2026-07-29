@@ -18,6 +18,7 @@ import {
   priceForSelection,
   selectionLabel,
 } from "@/lib/menu-options.mjs";
+import { rejectExpiredPendingOrders } from "@/lib/order-expiry";
 
 type Row = Record<string, any>;
 type RouteContext = { params: Promise<{ path?: string[] }> };
@@ -555,6 +556,7 @@ async function createOrder(db: AppDatabase, request: Request) {
 
 async function customerOrders(db: AppDatabase, request: Request, segments: string[]) {
   const customer = await customerFromRequest(db, request);
+  await rejectExpiredPendingOrders(db);
   if (request.method === "POST" && segments.length === 3 && segments[2] === "cancel") {
     const orderId = segments[1];
     const order = await db.prepare("SELECT * FROM orders WHERE id = ? AND user_id = ?").bind(orderId, customer.id).first<Row>();
@@ -647,6 +649,7 @@ async function adminAuth(db: AppDatabase, request: Request, segments: string[]) 
 
 async function adminOrders(db: AppDatabase, request: Request, segments: string[]) {
   const admin = await adminFromRequest(db, request);
+  await rejectExpiredPendingOrders(db);
   const orderId = segments[2];
   const action = segments[3];
   if (request.method === "POST" && orderId && action) {

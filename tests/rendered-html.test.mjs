@@ -3,7 +3,7 @@ import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 
 test("finished product metadata and starter cleanup are present", async () => {
-  const [layout, page, app, styles, apiRoute, packageJson, databaseClient, envExample] = await Promise.all([
+  const [layout, page, app, styles, apiRoute, packageJson, databaseClient, envExample, orderExpiry, cronRoute, vercelConfig] = await Promise.all([
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/ui/GrillApp.tsx", import.meta.url), "utf8"),
@@ -12,6 +12,9 @@ test("finished product metadata and starter cleanup are present", async () => {
     readFile(new URL("../package.json", import.meta.url), "utf8"),
     readFile(new URL("../db/client.ts", import.meta.url), "utf8"),
     readFile(new URL("../.env.example", import.meta.url), "utf8"),
+    readFile(new URL("../lib/order-expiry.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/cron/expire-orders/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../vercel.json", import.meta.url), "utf8"),
   ]);
   assert.match(layout, /Edison 爱吃烧烤/);
   assert.match(layout, /lang="zh-CN"/);
@@ -81,7 +84,18 @@ test("finished product metadata and starter cleanup are present", async () => {
   assert.match(databaseClient, /process\.env\.TURSO_DATABASE_URL/);
   assert.match(databaseClient, /process\.env\.VERCEL/);
   assert.match(envExample, /TURSO_DATABASE_URL/);
+  assert.match(envExample, /CRON_SECRET/);
   assert.match(apiRoute, /export const runtime = "nodejs"/);
+  assert.match(apiRoute, /await rejectExpiredPendingOrders\(db\)/);
+  assert.match(orderExpiry, /status = 'REJECTED'/);
+  assert.match(orderExpiry, /rejection_code = \?/);
+  assert.match(orderExpiry, /ORDER_AUTO_REJECT/);
+  assert.match(orderExpiry, /'SYSTEM'/);
+  assert.match(cronRoute, /Bearer \$\{secret\}/);
+  assert.deepEqual(JSON.parse(vercelConfig).crons, [{
+    path: "/api/cron/expire-orders",
+    schedule: "5 16 * * *",
+  }]);
   await assert.rejects(access(new URL("../app/_sites-preview", import.meta.url)));
   await assert.rejects(access(new URL("../.openai/hosting.json", import.meta.url)));
 });

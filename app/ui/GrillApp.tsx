@@ -655,7 +655,7 @@ function CustomerApp({ user, onLogout }: { user: Json; onLogout: () => void }) {
               <article className="order-card" key={order.id}>
                 <header><div><span className={`status status-${order.status}`}>{statusText[order.status]}</span><strong>{order.order_no}</strong></div><time>{dateTime(order.submitted_at)}</time></header>
                 <div className="order-items">{order.items.map((item: Json) => <p className={item.fulfillment_status === "SOLD_OUT" ? "sold-out-line" : ""} key={item.id}><span>{item.name_snapshot}{item.selection_label ? ` · ${item.selection_label}` : ""} × {item.quantity}{item.fulfillment_status === "SOLD_OUT" && <em>售罄 · 已移除金额</em>}</span><b>{money(item.subtotal_cent)}</b></p>)}</div>
-                <footer><span>{order.note || "无备注"}{order.removed_amount_cent > 0 && <small>已移除售罄商品 {money(order.removed_amount_cent)}</small>}</span><div><strong>{money(order.total_cent)}</strong>{order.status === "PENDING_CONFIRM" && <button className="outline-danger" onClick={() => cancel(order.id)}>撤回订单</button>}</div></footer>
+                <footer><span>{order.status === "REJECTED" && order.rejection_note ? `拒绝原因：${order.rejection_note}` : order.note || "无备注"}{order.removed_amount_cent > 0 && <small>已移除售罄商品 {money(order.removed_amount_cent)}</small>}</span><div><strong>{money(order.total_cent)}</strong>{order.status === "PENDING_CONFIRM" && <button className="outline-danger" onClick={() => cancel(order.id)}>撤回订单</button>}</div></footer>
               </article>
             ))}
           </div>
