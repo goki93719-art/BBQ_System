@@ -295,6 +295,9 @@ function CustomerApp({ user, onLogout }: { user: Json; onLogout: () => void }) {
   const [draftSelection, setDraftSelection] = useState<Json>({});
   const [pendingRepeatOrder, setPendingRepeatOrder] = useState<Json | null>(null);
   const [repeatBusy, setRepeatBusy] = useState(false);
+  const [orderSubmitting, setOrderSubmitting] = useState(false);
+  const orderSubmitLockRef = useRef(false);
+  const checkoutRequestIdRef = useRef<string | null>(null);
   const dismissMessage = useCallback(() => setMessage(""), []);
 
   const loadMenu = useCallback(async (query = "") => {
@@ -327,7 +330,7 @@ function CustomerApp({ user, onLogout }: { user: Json; onLogout: () => void }) {
       else if (pendingRepeatOrder) {
         if (!repeatBusy) setPendingRepeatOrder(null);
       }
-      else setCartOpen(false);
+      else if (!orderSubmitting) setCartOpen(false);
     };
     document.body.style.overflow = "hidden";
     window.addEventListener("keydown", closeOnEscape);
@@ -335,7 +338,7 @@ function CustomerApp({ user, onLogout }: { user: Json; onLogout: () => void }) {
       document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", closeOnEscape);
     };
-  }, [cartOpen, pendingRepeatOrder, repeatBusy, selectedItem]);
+  }, [cartOpen, orderSubmitting, pendingRepeatOrder, repeatBusy, selectedItem]);
   useEffect(() => {
     const refresh = () => { if (document.visibilityState === "visible") void loadMenu(searchedKeyword); };
     const timer = window.setInterval(refresh, 8000);
@@ -371,6 +374,11 @@ function CustomerApp({ user, onLogout }: { user: Json; onLogout: () => void }) {
     ? priceForSelection(selectedItem.price_cent, selectedItem.business_type, draftSelection)
     : 0;
 
+  function resetCheckoutAttempt() {
+    checkoutRequestIdRef.current = null;
+    setQuote(null);
+  }
+
   function openItem(item: Json) {
     if (!item.sellable) return;
     const selection = Object.fromEntries(
@@ -401,10 +409,11 @@ function CustomerApp({ user, onLogout }: { user: Json; onLogout: () => void }) {
     });
     setMessage(`${selectedItem.name} × ${draftQuantity} 已加入购物车`);
     setSelectedItem(null);
-    setQuote(null);
+    resetCheckoutAttempt();
   }
 
   function changeQuantity(lineKey: string, delta: number) {
+    if (orderSubmitting) return;
     setCart((current) => {
       const next = { ...current };
       const quantity = (next[lineKey]?.quantity ?? 0) + delta;
@@ -412,25 +421,29 @@ function CustomerApp({ user, onLogout }: { user: Json; onLogout: () => void }) {
       else next[lineKey] = { ...next[lineKey], quantity: Math.min(99, quantity) };
       return next;
     });
-    setQuote(null);
+    resetCheckoutAttempt();
   }
 
   function clearCart() {
-    if (!cartLines.length) return;
+    if (!cartLines.length || orderSubmitting) return;
     setCart({});
-    setQuote(null);
+    resetCheckoutAttempt();
     setNote("");
     setCartOpen(false);
     setMessage("购物车已清空");
   }
 
   async function submitOrder(confirmQuote = false) {
+    if (orderSubmitLockRef.current) return;
     if (!cartLines.length) return;
     if (invalidCartLines.length) {
       setMessage("请先移除失效商品，再确认提交。");
       return;
     }
-    const requestId = quote?.requestId ?? crypto.randomUUID();
+    orderSubmitLockRef.current = true;
+    setOrderSubmitting(true);
+    const requestId = quote?.requestId ?? checkoutRequestIdRef.current ?? crypto.randomUUID();
+    checkoutRequestIdRef.current = requestId;
     try {
       const data = await api("/api/orders", {
         method: "POST",
@@ -448,6 +461,7 @@ function CustomerApp({ user, onLogout }: { user: Json; onLogout: () => void }) {
       });
       setCart({});
       setQuote(null);
+      checkoutRequestIdRef.current = null;
       setCartOpen(false);
       setMessage(`订单 ${data.order.order_no} 已提交，等待商家确认`);
       await loadOrders();
@@ -482,6 +496,9 @@ function CustomerApp({ user, onLogout }: { user: Json; onLogout: () => void }) {
         return;
       }
       setMessage(apiError.message);
+    } finally {
+      orderSubmitLockRef.current = false;
+      setOrderSubmitting(false);
     }
   }
 
@@ -540,7 +557,7 @@ function CustomerApp({ user, onLogout }: { user: Json; onLogout: () => void }) {
         }
         return merged;
       });
-      setQuote(null);
+      resetCheckoutAttempt();
       setTab("menu");
       setCartOpen(true);
       const result = strategy === "append"
@@ -660,15 +677,15 @@ function CustomerApp({ user, onLogout }: { user: Json; onLogout: () => void }) {
 
       <button className="cart-fab" aria-label={`打开购物车，当前 ${cartCount} 件商品`} onClick={() => setCartOpen(true)}><span>🛒</span><b>{cartCount || 0}</b><strong>{cartCount ? `${money(cartTotal)} · 去结算` : "购物车"}</strong></button>
       {cartOpen && (
-        <div className="drawer-backdrop" onClick={() => setCartOpen(false)}>
-          <aside className="cart-drawer" role="dialog" aria-modal="true" aria-label="购物车" onClick={(event) => event.stopPropagation()}>
-            <header><div><p className="eyebrow">YOUR CART</p><h2>购物车</h2></div><div className="cart-header-actions">{!!cartLines.length && <button className="clear-cart" aria-label="一键清空购物车" onClick={clearCart}>清空</button>}<button className="cart-close" aria-label="关闭购物车" onClick={() => setCartOpen(false)}>×</button></div></header>
+        <div className="drawer-backdrop" onClick={() => !orderSubmitting && setCartOpen(false)}>
+          <aside className="cart-drawer" role="dialog" aria-modal="true" aria-label="购物车" aria-busy={orderSubmitting} onClick={(event) => event.stopPropagation()}>
+            <header><div><p className="eyebrow">YOUR CART</p><h2>购物车</h2></div><div className="cart-header-actions">{!!cartLines.length && <button className="clear-cart" aria-label="一键清空购物车" disabled={orderSubmitting} onClick={clearCart}>清空</button>}<button className="cart-close" aria-label="关闭购物车" disabled={orderSubmitting} onClick={() => setCartOpen(false)}>×</button></div></header>
             <div className="cart-lines">
               {!cartLines.length && <div className="empty-state">还没选好吃的，去菜单逛逛。</div>}
-              {cartLines.map((line) => <div className={`cart-line ${line.invalid ? "invalid" : ""}`} key={line.lineKey}><span className="cart-icon">{line.image_url}</span><div><strong>{line.name}</strong>{line.selection_label && <em>{line.selection_label}</em>}<small>{line.invalid ? `失效：${line.invalidReason}` : money(line.price_cent)}</small>{line.invalid && <button className="remove-invalid" onClick={() => changeQuantity(line.lineKey, -line.quantity)}>移除失效商品</button>}</div><div className="stepper"><button aria-label={`减少一份${line.name}`} disabled={line.invalid} onClick={() => changeQuantity(line.lineKey, -1)}>−</button><b>{line.quantity}</b><button aria-label={`增加一份${line.name}`} disabled={line.invalid} onClick={() => changeQuantity(line.lineKey, 1)}>+</button></div></div>)}
+              {cartLines.map((line) => <div className={`cart-line ${line.invalid ? "invalid" : ""}`} key={line.lineKey}><span className="cart-icon">{line.image_url}</span><div><strong>{line.name}</strong>{line.selection_label && <em>{line.selection_label}</em>}<small>{line.invalid ? `失效：${line.invalidReason}` : money(line.price_cent)}</small>{line.invalid && <button className="remove-invalid" disabled={orderSubmitting} onClick={() => changeQuantity(line.lineKey, -line.quantity)}>移除失效商品</button>}</div><div className="stepper"><button aria-label={`减少一份${line.name}`} disabled={line.invalid || orderSubmitting} onClick={() => changeQuantity(line.lineKey, -1)}>−</button><b>{line.quantity}</b><button aria-label={`增加一份${line.name}`} disabled={line.invalid || orderSubmitting} onClick={() => changeQuantity(line.lineKey, 1)}>+</button></div></div>)}
             </div>
             {!!invalidCartLines.length && <div className="cart-stock-alert" role="alert"><strong>购物车有 {invalidCartLines.length} 种失效商品</strong><span>商品可能已售罄或下架，已自动从合计金额中扣除，请移除后再提交。</span></div>}
-            <label className="note-field">订单备注<textarea value={note} onChange={(event) => setNote(event.target.value)} maxLength={200} placeholder="例如：少辣、不要香菜" /></label>
+            <label className="note-field">订单备注<textarea value={note} disabled={orderSubmitting} onChange={(event) => { setNote(event.target.value); resetCheckoutAttempt(); }} maxLength={200} placeholder="例如：少辣、不要香菜" /></label>
             {!!cartLines.length && (
               <div className={`balance-tip ${missingGroups.length ? "" : "complete"}`}>
                 <span>{missingGroups.length ? "搭配小提示" : "搭配很丰富"}</span>
@@ -676,7 +693,7 @@ function CustomerApp({ user, onLogout }: { user: Json; onLogout: () => void }) {
               </div>
             )}
             {quote && <div className="quote-alert">菜单有变化，已为你更新购物车。请再次确认金额。</div>}
-            <footer><div><span>合计（失效商品不计）</span><strong>{money(cartTotal)}</strong></div><button className="primary-button wide" disabled={!cartLines.length || invalidCartLines.length > 0} onClick={() => submitOrder(Boolean(quote))}>{invalidCartLines.length ? "请先移除失效商品" : quote ? "确认变更并提交" : "提交订单 · 门店确认"}</button></footer>
+            <footer><div><span>合计（失效商品不计）</span><strong>{money(cartTotal)}</strong></div><button className="primary-button wide" disabled={orderSubmitting || !cartLines.length || invalidCartLines.length > 0} onClick={() => submitOrder(Boolean(quote))}>{orderSubmitting ? "订单提交中…" : invalidCartLines.length ? "请先移除失效商品" : quote ? "确认变更并提交" : "提交订单 · 门店确认"}</button></footer>
           </aside>
         </div>
       )}

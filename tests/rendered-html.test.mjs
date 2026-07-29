@@ -39,6 +39,12 @@ test("finished product metadata and starter cleanup are present", async () => {
   assert.match(app, /role="dialog" aria-modal="true" aria-label="购物车"/);
   assert.match(app, /aria-label="顾客端主导航"/);
   assert.match(app, /搭配小提示/);
+  assert.match(app, /const orderSubmitLockRef = useRef\(false\)/);
+  assert.match(app, /const checkoutRequestIdRef = useRef<string \| null>\(null\)/);
+  assert.match(app, /if \(orderSubmitLockRef\.current\) return/);
+  assert.match(app, /quote\?\.requestId \?\? checkoutRequestIdRef\.current \?\? crypto\.randomUUID\(\)/);
+  assert.match(app, /disabled=\{orderSubmitting \|\| !cartLines\.length/);
+  assert.match(app, /订单提交中…/);
   assert.match(app, /近一年订单记录/);
   assert.match(app, /今日待处理/);
   assert.match(app, /今日已确认/);
