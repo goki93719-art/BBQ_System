@@ -168,6 +168,7 @@ record(
 const historyDefault = await call("/api/admin/orders?view=history&page=1", { cookie: managerCookie });
 const history10 = await call("/api/admin/orders?view=history&page=1&page_size=10", { cookie: managerCookie });
 const history20 = await call("/api/admin/orders?view=history&page=1&page_size=20", { cookie: managerCookie });
+const orderDashboard = await call("/api/admin/orders?status=PENDING_CONFIRM&page_size=100", { cookie: managerCookie });
 const historyItems = history10.payload.data?.items ?? [];
 record(
   "近一年订单倒序分页",
@@ -181,6 +182,15 @@ record(
     history20.payload.data?.page_size === 20 &&
     history20.payload.data?.total === history10.payload.data?.total,
   `total=${history10.payload.data?.total}, page10=${historyItems.length}, page20=${history20.payload.data?.items?.length}`,
+);
+record(
+  "订单中心当日指标",
+  orderDashboard.status === 200 &&
+    /^\d{4}-\d{2}-\d{2}$/.test(orderDashboard.payload.data?.today_summary?.business_date) &&
+    Number.isInteger(orderDashboard.payload.data?.today_summary?.pending_count) &&
+    Number.isInteger(orderDashboard.payload.data?.today_summary?.confirmed_count) &&
+    Number.isInteger(orderDashboard.payload.data?.today_summary?.confirmed_amount_cent),
+  JSON.stringify(orderDashboard.payload.data?.today_summary),
 );
 
 const summary = {

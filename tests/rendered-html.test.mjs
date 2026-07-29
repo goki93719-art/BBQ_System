@@ -17,6 +17,9 @@ test("finished product metadata and starter cleanup are present", async () => {
   assert.match(app, /一键重订/);
   assert.match(app, /搭配小提示/);
   assert.match(app, /近一年订单记录/);
+  assert.match(app, /今日待处理/);
+  assert.match(app, /今日已确认/);
+  assert.match(app, /今日确认金额/);
   assert.match(app, /\[10, 20, 50\]/);
   assert.match(app, /TrendLineChart/);
   assert.match(app, /全年（月度汇总）/);

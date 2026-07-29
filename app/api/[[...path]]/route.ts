@@ -770,7 +770,37 @@ async function adminOrders(db: D1Database, request: Request, segments: string[])
       : "SELECT COUNT(*) total FROM orders WHERE store_id = ?",
   ).bind(...(status ? [STORE_ID, status] : [STORE_ID])).first<Row>();
   const total = Number(totalRow?.total ?? 0);
-  return success({ items: detailed, page, page_size: pageSize, total, total_pages: Math.max(1, Math.ceil(total / pageSize)) });
+  let todaySummary: Row | undefined;
+  if (status === "PENDING_CONFIRM") {
+    const today = businessDate(new Date());
+    const [pendingToday, confirmedToday] = await Promise.all([
+      db.prepare(
+        `SELECT COUNT(*) pending_count
+         FROM orders
+         WHERE store_id = ? AND status = 'PENDING_CONFIRM'
+           AND date(datetime(submitted_at, '+8 hours')) = ?`,
+      ).bind(STORE_ID, today).first<Row>(),
+      db.prepare(
+        `SELECT COUNT(*) confirmed_count, COALESCE(SUM(confirmed_amount_cent), 0) confirmed_amount_cent
+         FROM consumption_records
+         WHERE store_id = ? AND status = 'CONFIRMED' AND business_date = ?`,
+      ).bind(STORE_ID, today).first<Row>(),
+    ]);
+    todaySummary = {
+      business_date: today,
+      pending_count: Number(pendingToday?.pending_count ?? 0),
+      confirmed_count: Number(confirmedToday?.confirmed_count ?? 0),
+      confirmed_amount_cent: Number(confirmedToday?.confirmed_amount_cent ?? 0),
+    };
+  }
+  return success({
+    items: detailed,
+    page,
+    page_size: pageSize,
+    total,
+    total_pages: Math.max(1, Math.ceil(total / pageSize)),
+    today_summary: todaySummary,
+  });
 }
 
 async function adminMenu(db: D1Database, request: Request, segments: string[]) {
@@ -913,22 +943,16 @@ async function adminMenu(db: D1Database, request: Request, segments: string[]) {
 
 async function adminAnalytics(db: D1Database, request: Request) {
   const admin = await adminFromRequest(db, request);
+  if (admin.role !== "MANAGER") {
+    throw new ApiError(403, "FORBIDDEN", "仅店长可以查看经营分析。");
+  }
   const { url } = pageParams(request);
   const today = businessDate(new Date());
   const currentYear = Number(today.slice(0, 4));
   const requestedYear = Number(url.searchParams.get("year") ?? currentYear);
   const monthValue = url.searchParams.get("month");
   const requestedMonth = monthValue ? Number(monthValue) : undefined;
-  const legacyPeriod = url.searchParams.get("period");
-  if (
-    admin.role === "OPERATOR" &&
-    (url.searchParams.has("year") || url.searchParams.has("month") || (legacyPeriod !== null && legacyPeriod !== "today"))
-  ) {
-    throw new ApiError(403, "FORBIDDEN", "操作员仅可查看今日摘要。");
-  }
-  const selected = admin.role === "MANAGER"
-    ? analyticsRange(requestedYear, requestedMonth)
-    : { start: today, end: addDays(today, 1), scope: "today" as const };
+  const selected = analyticsRange(requestedYear, requestedMonth);
   const { start, end, scope } = selected;
   const cutoff = new Date().toISOString();
   const summary = await db.prepare(
@@ -955,14 +979,12 @@ async function adminAnalytics(db: D1Database, request: Request) {
      ORDER BY amount_cent DESC, name, category_id`,
   ).bind(STORE_ID, start, end, cutoff).all<Row>();
   const bucketExpression = scope === "year" ? "substr(business_date, 1, 7)" : "business_date";
-  const trend = scope === "today"
-    ? { results: [] as Row[] }
-    : await db.prepare(
-      `SELECT ${bucketExpression} bucket, SUM(confirmed_amount_cent) amount_cent, COUNT(*) order_count
-       FROM consumption_records WHERE store_id = ? AND status = 'CONFIRMED'
-         AND business_date >= ? AND business_date < ? AND confirmed_at_utc <= ?
-       GROUP BY ${bucketExpression} ORDER BY ${bucketExpression}`,
-    ).bind(STORE_ID, start, end, cutoff).all<Row>();
+  const trend = await db.prepare(
+    `SELECT ${bucketExpression} bucket, SUM(confirmed_amount_cent) amount_cent, COUNT(*) order_count
+     FROM consumption_records WHERE store_id = ? AND status = 'CONFIRMED'
+       AND business_date >= ? AND business_date < ? AND confirmed_at_utc <= ?
+     GROUP BY ${bucketExpression} ORDER BY ${bucketExpression}`,
+  ).bind(STORE_ID, start, end, cutoff).all<Row>();
   const yearRows = await db.prepare(
     `SELECT DISTINCT substr(business_date, 1, 4) year
      FROM consumption_records WHERE store_id = ?
@@ -975,7 +997,7 @@ async function adminAnalytics(db: D1Database, request: Request) {
   const total = Number(summary?.amount_cent ?? 0);
   return success({
     scope,
-    year: scope === "today" ? currentYear : requestedYear,
+    year: requestedYear,
     month: scope === "month" ? requestedMonth : null,
     available_years: availableYears,
     range: { start, end_exclusive: end, cutoff_utc: cutoff },
@@ -985,7 +1007,7 @@ async function adminAnalytics(db: D1Database, request: Request) {
       ...row,
       contribution_bps: total ? Math.round(Number(row.amount_cent) * 10_000 / total) : 0,
     })),
-    trend: scope === "today" ? [] : fillCalendarTrend(scope, start, end, trend.results),
+    trend: fillCalendarTrend(scope, start, end, trend.results),
   });
 }
 

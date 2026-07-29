@@ -663,7 +663,7 @@ function AdminApp({ admin, onLogout }: { admin: Json; onLogout: () => void }) {
   const [orderPageSize, setOrderPageSize] = useState(10);
   const [orderTotal, setOrderTotal] = useState(0);
   const [orderTotalPages, setOrderTotalPages] = useState(1);
-  const [orderSummary, setOrderSummary] = useState<Json>({ confirmed_count: 0, confirmed_amount_cent: 0 });
+  const [todayOrderSummary, setTodayOrderSummary] = useState<Json>({ pending_count: 0, confirmed_count: 0, confirmed_amount_cent: 0 });
   const [categories, setCategories] = useState<Json[]>([]);
   const [items, setItems] = useState<Json[]>([]);
   const [analytics, setAnalytics] = useState<Json>({ summary: {}, top_items: [], trend: [] });
@@ -683,7 +683,7 @@ function AdminApp({ admin, onLogout }: { admin: Json; onLogout: () => void }) {
     setOrderPage(historyData.page);
     setOrderTotal(historyData.total);
     setOrderTotalPages(historyData.total_pages);
-    setOrderSummary(historyData.summary);
+    setTodayOrderSummary(pendingData.today_summary);
   }, [orderPage, orderPageSize]);
   const loadMenu = useCallback(async () => {
     const [categoryData, itemData] = await Promise.all([api("/api/admin/categories?page_size=100"), api("/api/admin/items?page_size=100")]);
@@ -691,11 +691,8 @@ function AdminApp({ admin, onLogout }: { admin: Json; onLogout: () => void }) {
     setItems(itemData.items);
   }, []);
   const loadAnalytics = useCallback(async () => {
-    const data = await api(
-      manager
-        ? `/api/admin/analytics?year=${analyticsYear}${analyticsMonth ? `&month=${analyticsMonth}` : ""}`
-        : "/api/admin/analytics",
-    );
+    if (!manager) return;
+    const data = await api(`/api/admin/analytics?year=${analyticsYear}${analyticsMonth ? `&month=${analyticsMonth}` : ""}`);
     setAnalytics(data);
   }, [analyticsMonth, analyticsYear, manager]);
   const loadAudits = useCallback(async () => {
@@ -794,7 +791,7 @@ function AdminApp({ admin, onLogout }: { admin: Json; onLogout: () => void }) {
         <nav>
           <button className={tab === "orders" ? "active" : ""} onClick={() => setTab("orders")}><span>▤</span>订单中心{pending.length > 0 && <b>{pending.length}</b>}</button>
           <button className={tab === "menu" ? "active" : ""} onClick={() => setTab("menu")}><span>◫</span>菜单管理</button>
-          <button className={tab === "analytics" ? "active" : ""} onClick={() => setTab("analytics")}><span>↗</span>经营分析</button>
+          {manager && <button className={tab === "analytics" ? "active" : ""} onClick={() => setTab("analytics")}><span>↗</span>经营分析</button>}
           {manager && <button className={tab === "audit" ? "active" : ""} onClick={() => setTab("audit")}><span>◎</span>审计日志</button>}
         </nav>
         <div className="admin-profile"><span>{admin.display_name.slice(0, 1)}</span><div><strong>{admin.display_name}</strong><small>{manager ? "店长" : "操作员"}</small></div><button onClick={logout}>退出</button></div>
@@ -802,7 +799,7 @@ function AdminApp({ admin, onLogout }: { admin: Json; onLogout: () => void }) {
       <main className="admin-main">
         {tab === "orders" && <>
           <div className="admin-title"><div><p className="eyebrow">ORDER DESK</p><h1>订单中心</h1><p>新订单每 3 秒自动刷新，先确认备注，再稳稳接单。</p></div><button className="ghost-button" onClick={loadOrders}>立即刷新</button></div>
-          <div className="admin-metrics"><div><span>待处理</span><strong>{pending.length}</strong><small>需要关注</small></div><div><span>近一年已确认</span><strong>{orderSummary.confirmed_count ?? 0}</strong><small>按订单时间统计</small></div><div><span>近一年确认金额</span><strong>{money(orderSummary.confirmed_amount_cent)}</strong><small>已排除作废订单</small></div></div>
+          <div className="admin-metrics"><div><span>今日待处理</span><strong>{todayOrderSummary.pending_count ?? 0}</strong><small>按营业日统计</small></div><div><span>今日已确认</span><strong>{todayOrderSummary.confirmed_count ?? 0}</strong><small>已确认未作废</small></div><div><span>今日确认金额</span><strong>{money(todayOrderSummary.confirmed_amount_cent)}</strong><small>已排除作废订单</small></div></div>
           <section className="admin-panel"><header><h2>待确认订单</h2><span>{pending.length} 单等待处理</span></header>
             <div className="admin-order-grid">
               {pending.length === 0 && <div className="empty-state">所有订单都已处理，干得漂亮。</div>}
@@ -837,7 +834,7 @@ function AdminApp({ admin, onLogout }: { admin: Json; onLogout: () => void }) {
         </>}
 
         {tab === "analytics" && <>
-          <div className="admin-title"><div><p className="eyebrow">BUSINESS PULSE</p><h1>经营分析</h1><p>{manager ? "按年份或月份查看确认金额、订单与销售趋势。" : "操作员仅可查看今日摘要。"}</p></div></div>
+          <div className="admin-title"><div><p className="eyebrow">BUSINESS PULSE</p><h1>经营分析</h1><p>按年份或月份查看确认金额、订单与销售趋势。</p></div></div>
           {manager && <div className="analytics-filters">
             <label>年份
               <select value={analyticsYear} onChange={(event) => setAnalyticsYear(Number(event.target.value))}>
