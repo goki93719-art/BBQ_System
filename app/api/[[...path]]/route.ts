@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { ensureDatabase, STORE_ID } from "@/db/runtime";
+import type { AppDatabase } from "@/db/client";
 import { clearCookie, randomToken, readCookie, sessionCookie, sha256, verifyPassword, hashPassword } from "@/lib/security";
 import {
   businessDate,
@@ -117,7 +118,7 @@ function pageParams(request: Request) {
   return { page, pageSize, offset: (page - 1) * pageSize, url };
 }
 
-async function createSession(db: D1Database, subjectType: "CUSTOMER" | "ADMIN", subjectId: string) {
+async function createSession(db: AppDatabase, subjectType: "CUSTOMER" | "ADMIN", subjectId: string) {
   const token = randomToken();
   const now = new Date().toISOString();
   await db.prepare(
@@ -126,7 +127,7 @@ async function createSession(db: D1Database, subjectType: "CUSTOMER" | "ADMIN", 
   return token;
 }
 
-async function customerFromRequest(db: D1Database, request: Request) {
+async function customerFromRequest(db: AppDatabase, request: Request) {
   const token = readCookie(request, "customer_session");
   if (!token) throw new ApiError(401, "AUTH_REQUIRED", "请先登录顾客账号。");
   const row = await db.prepare(
@@ -139,7 +140,7 @@ async function customerFromRequest(db: D1Database, request: Request) {
   return row;
 }
 
-async function adminFromRequest(db: D1Database, request: Request, managerOnly = false) {
+async function adminFromRequest(db: AppDatabase, request: Request, managerOnly = false) {
   const token = readCookie(request, "admin_session");
   if (!token) throw new ApiError(401, "AUTH_REQUIRED", "请先登录管理端。");
   const row = await db.prepare(
@@ -163,7 +164,7 @@ function publicAdmin(row: Row) {
   return { id: row.id, username: row.username, display_name: row.display_name, role: row.role };
 }
 
-async function orderDetails(db: D1Database, order: Row) {
+async function orderDetails(db: AppDatabase, order: Row) {
   const [items, history] = await Promise.all([
     db.prepare("SELECT * FROM order_items WHERE order_id = ? ORDER BY id").bind(order.id).all<Row>(),
     db.prepare("SELECT * FROM order_status_history WHERE order_id = ? ORDER BY created_at").bind(order.id).all<Row>(),
@@ -182,7 +183,7 @@ async function orderDetails(db: D1Database, order: Row) {
   };
 }
 
-async function currentCart(db: D1Database, requested: Row[]) {
+async function currentCart(db: AppDatabase, requested: Row[]) {
   if (!Array.isArray(requested) || requested.length === 0 || requested.length > 50) {
     throw new ApiError(400, "INVALID_CART", "购物车需包含 1–50 个商品。");
   }
@@ -265,7 +266,7 @@ async function currentCart(db: D1Database, requested: Row[]) {
   });
 }
 
-async function handleAuth(db: D1Database, request: Request, segments: string[]) {
+async function handleAuth(db: AppDatabase, request: Request, segments: string[]) {
   const action = segments[1];
   if (request.method === "POST" && action === "code" && segments[2] === "login") {
     const body = await readBody(request);
@@ -398,7 +399,7 @@ async function handleAuth(db: D1Database, request: Request, segments: string[]) 
   throw new ApiError(404, "NOT_FOUND", "接口不存在。");
 }
 
-async function handleMenu(db: D1Database, request: Request) {
+async function handleMenu(db: AppDatabase, request: Request) {
   const keyword = (new URL(request.url).searchParams.get("keyword") ?? "").trim().toLocaleLowerCase();
   const monthStart = periodStart("month");
   const monthEnd = endDateExclusive();
@@ -448,7 +449,7 @@ async function handleMenu(db: D1Database, request: Request) {
   return success({ store, categories, keyword, sales_month: monthStart.slice(0, 7) });
 }
 
-async function createOrder(db: D1Database, request: Request) {
+async function createOrder(db: AppDatabase, request: Request) {
   const customer = await customerFromRequest(db, request);
   const body = await readBody(request);
   const clientRequestId = String(body.clientRequestId ?? "");
@@ -552,7 +553,7 @@ async function createOrder(db: D1Database, request: Request) {
   return success({ order: await orderDetails(db, order!), idempotent_replay: false }, 201);
 }
 
-async function customerOrders(db: D1Database, request: Request, segments: string[]) {
+async function customerOrders(db: AppDatabase, request: Request, segments: string[]) {
   const customer = await customerFromRequest(db, request);
   if (request.method === "POST" && segments.length === 3 && segments[2] === "cancel") {
     const orderId = segments[1];
@@ -593,7 +594,7 @@ async function customerOrders(db: D1Database, request: Request, segments: string
   return success({ items: ordersWithItems, page, page_size: pageSize });
 }
 
-async function customerConsumption(db: D1Database, request: Request) {
+async function customerConsumption(db: AppDatabase, request: Request) {
   const customer = await customerFromRequest(db, request);
   const { url, page, pageSize, offset } = pageParams(request);
   const period = url.searchParams.get("period") ?? "month";
@@ -623,7 +624,7 @@ async function customerConsumption(db: D1Database, request: Request) {
   });
 }
 
-async function adminAuth(db: D1Database, request: Request, segments: string[]) {
+async function adminAuth(db: AppDatabase, request: Request, segments: string[]) {
   const action = segments[2];
   if (request.method === "POST" && action === "login") {
     const body = await readBody(request);
@@ -644,7 +645,7 @@ async function adminAuth(db: D1Database, request: Request, segments: string[]) {
   throw new ApiError(404, "NOT_FOUND", "接口不存在。");
 }
 
-async function adminOrders(db: D1Database, request: Request, segments: string[]) {
+async function adminOrders(db: AppDatabase, request: Request, segments: string[]) {
   const admin = await adminFromRequest(db, request);
   const orderId = segments[2];
   const action = segments[3];
@@ -840,7 +841,7 @@ async function adminOrders(db: D1Database, request: Request, segments: string[])
   });
 }
 
-async function adminMenu(db: D1Database, request: Request, segments: string[]) {
+async function adminMenu(db: AppDatabase, request: Request, segments: string[]) {
   const admin = await adminFromRequest(db, request, request.method !== "GET");
   const resource = segments[1];
   const id = segments[2];
@@ -978,7 +979,7 @@ async function adminMenu(db: D1Database, request: Request, segments: string[]) {
   throw new ApiError(404, "NOT_FOUND", "接口不存在。");
 }
 
-async function adminAnalytics(db: D1Database, request: Request) {
+async function adminAnalytics(db: AppDatabase, request: Request) {
   const admin = await adminFromRequest(db, request);
   if (admin.role !== "MANAGER") {
     throw new ApiError(403, "FORBIDDEN", "仅店长可以查看经营分析。");
@@ -1048,7 +1049,7 @@ async function adminAnalytics(db: D1Database, request: Request) {
   });
 }
 
-async function adminAudits(db: D1Database, request: Request) {
+async function adminAudits(db: AppDatabase, request: Request) {
   await adminFromRequest(db, request, true);
   const { page, pageSize, offset } = pageParams(request);
   const rows = await db.prepare(
@@ -1095,3 +1096,5 @@ async function handler(request: Request, context: RouteContext) {
 export const GET = handler;
 export const POST = handler;
 export const PATCH = handler;
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";

@@ -1,4 +1,4 @@
-import { env } from "cloudflare:workers";
+import { getDatabase, type AppDatabase, type AppPreparedStatement } from "@/db/client";
 import { hashPassword } from "@/lib/security";
 import { assertMockConfiguration } from "@/lib/rules.mjs";
 import { normalizeItemSelection, priceForSelection } from "@/lib/menu-options.mjs";
@@ -67,7 +67,7 @@ const seedItems = [
   ["stout", "cat-beer", "BR-005", "烘焙世涛", "咖啡可可风味", 3800, "⚫", '{"容量":"330ml","ABV":"7.0%"}'],
 ];
 
-async function ensureOrderItemExtensions(db: D1Database) {
+async function ensureOrderItemExtensions(db: AppDatabase) {
   const columns = await db.prepare("PRAGMA table_info(order_items)").all<{ name: string }>();
   const names = new Set(columns.results.map((column) => column.name));
   if (!names.has("selection_snapshot_json")) {
@@ -82,12 +82,12 @@ async function ensureOrderItemExtensions(db: D1Database) {
   await db.prepare("CREATE INDEX IF NOT EXISTS order_items_item_status_idx ON order_items(item_id, fulfillment_status)").run();
 }
 
-async function seedHistoricalData(db: D1Database) {
+async function seedHistoricalData(db: AppDatabase) {
   const seeded = await db.prepare("SELECT value FROM app_meta WHERE key = ?").bind("seed_v4").first();
   if (seeded) return;
   const now = new Date();
   const nowIso = now.toISOString();
-  const catalogStatements: D1PreparedStatement[] = [];
+  const catalogStatements: AppPreparedStatement[] = [];
   for (const [id, name, code, type, sort] of seedCategories) {
     catalogStatements.push(
       db.prepare("INSERT OR IGNORE INTO categories VALUES (?, ?, ?, ?, ?, 'ENABLED', '[]', ?, 1, ?, ?)")
@@ -112,7 +112,7 @@ async function seedHistoricalData(db: D1Database) {
     id: String(id), name: String(name), code: String(code), type: String(type),
   }]));
   const historyItems = seedItems.filter(([id]) => id !== "stout");
-  const statements: D1PreparedStatement[] = [];
+  const statements: AppPreparedStatement[] = [];
   for (let monthOffset = 0; monthOffset < 6; monthOffset += 1) {
     const orderCount = monthOffset === 0 ? 8 : 4;
     const monthDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - monthOffset, 1, 12));
@@ -188,14 +188,10 @@ async function seedHistoricalData(db: D1Database) {
 }
 
 async function initialize() {
-  const runtimeEnv = env as typeof env & { APP_ENV?: string; MOCK_SMS_ENABLED?: string };
-  const processEnvironment: Record<string, string | undefined> =
-    typeof process !== "undefined" ? process.env : {};
-  const appEnvironment = runtimeEnv.APP_ENV ?? processEnvironment.APP_ENV ?? "development";
-  const mockSmsEnabled = runtimeEnv.MOCK_SMS_ENABLED ?? processEnvironment.MOCK_SMS_ENABLED ?? "true";
+  const appEnvironment = process.env.APP_ENV ?? "development";
+  const mockSmsEnabled = process.env.MOCK_SMS_ENABLED ?? "true";
   assertMockConfiguration(appEnvironment, mockSmsEnabled);
-  const db = runtimeEnv.DB;
-  if (!db) throw new Error("D1 binding DB is unavailable");
+  const db = getDatabase();
   await db.batch(schemaStatements.map((statement) => db.prepare(statement)));
   await ensureOrderItemExtensions(db);
   const seeded = await db.prepare("SELECT value FROM app_meta WHERE key = ?").bind("seed_v1").first();
@@ -270,7 +266,7 @@ export async function ensureDatabase() {
     throw error;
   });
   await ready;
-  return env.DB;
+  return getDatabase();
 }
 
 export { STORE_ID };

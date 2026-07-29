@@ -1,6 +1,6 @@
 # Edison 爱吃烧烤
 
-基于 Vinext / React / Cloudflare D1 的单门店烧烤点餐演示系统。一个响应式页面提供“顾客点餐”和“门店管理”双模式，数据持久化在 D1。
+基于 Next.js / React / Turso libSQL 的单门店烧烤点餐演示系统。一个响应式页面提供“顾客点餐”和“门店管理”双模式，可直接部署到 Vercel，业务数据持久化在 Turso。
 
 ## 功能
 
@@ -17,13 +17,35 @@ npm install
 npm run dev
 ```
 
-也可以使用：
+本地开发默认使用项目目录中的 `edison-grill.local.db`，不需要提前创建云数据库。该文件已经加入 `.gitignore`。
 
-```bash
-./scripts/start-local.sh
+如需让本地环境连接部署使用的 Turso 数据库，将 `.env.example` 复制为 `.env.local`，填写：
+
+```dotenv
+TURSO_DATABASE_URL=libsql://your-database.turso.io
+TURSO_AUTH_TOKEN=your-database-token
+APP_ENV=demo
+MOCK_SMS_ENABLED=true
 ```
 
-D1 绑定名为 `DB`。首次访问 API 时会使用 prepared statements 初始化本地表结构和可重复种子数据；用于部署的正式迁移位于 `drizzle/`。
+首次访问 API 时会自动初始化表结构及可重复执行的演示种子数据。
+
+## 部署到 Vercel
+
+1. 在 Vercel 导入 GitHub 仓库 `goki93719-art/BBQ_System`。
+2. **Root Directory** 保持仓库根目录 `.`。只有在导入外层工作区仓库时，才设置为 `webapp`。
+3. **Framework Preset** 选择 `Next.js`。
+4. Build Command 使用默认值 `npm run build`；**Output Directory 留空**，由 Next.js 自动管理。
+5. 在 Vercel Marketplace/Storage 中创建并连接 Turso 数据库，或者手动配置：
+
+   - `TURSO_DATABASE_URL`
+   - `TURSO_AUTH_TOKEN`
+   - `APP_ENV=demo`
+   - `MOCK_SMS_ENABLED=true`
+
+6. 重新部署。首次访问任一 API 后，数据库会自动建表并插入演示数据。
+
+当前固定验证码 `9999` 仅用于测试版。接入真实短信前不要把 `APP_ENV` 设置为 `production`；生产模式会阻止 Mock 验证码配置。
 
 ## 演示账号
 
@@ -53,8 +75,9 @@ app/
   api/[[...path]]/route.ts   统一 JSON API
   ui/GrillApp.tsx            顾客/管理双模式交互
 db/
-  schema.ts                  Drizzle D1 模型
-  runtime.ts                 prepared statements 初始化与种子
+  client.ts                  Turso/libSQL 数据库适配层
+  schema.ts                  Drizzle SQLite 模型
+  runtime.ts                 表结构初始化与演示种子
 drizzle/                     可部署迁移
 lib/                         安全与冻结业务规则
 tests/                       规则、数据库不变量、产品结构测试

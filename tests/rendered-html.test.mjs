@@ -3,14 +3,15 @@ import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 
 test("finished product metadata and starter cleanup are present", async () => {
-  const [layout, page, app, styles, apiRoute, packageJson, hosting] = await Promise.all([
+  const [layout, page, app, styles, apiRoute, packageJson, databaseClient, envExample] = await Promise.all([
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/ui/GrillApp.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
     readFile(new URL("../app/api/[[...path]]/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
-    readFile(new URL("../.openai/hosting.json", import.meta.url), "utf8"),
+    readFile(new URL("../db/client.ts", import.meta.url), "utf8"),
+    readFile(new URL("../.env.example", import.meta.url), "utf8"),
   ]);
   assert.match(layout, /Edison 爱吃烧烤/);
   assert.match(layout, /lang="zh-CN"/);
@@ -65,10 +66,16 @@ test("finished product metadata and starter cleanup are present", async () => {
   assert.match(styles, /\.inventory-action\.sold-out/);
   assert.match(styles, /\.cart-line\.invalid .cart-icon/);
   assert.doesNotMatch(`${layout}\n${page}\n${packageJson}`, /codex-preview|react-loading-skeleton|SkeletonPreview/);
-  assert.deepEqual(JSON.parse(hosting), {
-    project_id: "appgprj_6a690548f4c881918d2d5cda9518de61",
-    d1: "DB",
-    r2: null,
-  });
+  const packageConfig = JSON.parse(packageJson);
+  assert.equal(packageConfig.scripts.dev, "next dev");
+  assert.equal(packageConfig.scripts.build, "next build");
+  assert.equal(packageConfig.scripts.start, "next start");
+  assert.equal(packageConfig.dependencies["@libsql/client"], "0.15.15");
+  assert.doesNotMatch(packageJson, /vinext|wrangler|@cloudflare\/vite-plugin/);
+  assert.match(databaseClient, /process\.env\.TURSO_DATABASE_URL/);
+  assert.match(databaseClient, /process\.env\.VERCEL/);
+  assert.match(envExample, /TURSO_DATABASE_URL/);
+  assert.match(apiRoute, /export const runtime = "nodejs"/);
   await assert.rejects(access(new URL("../app/_sites-preview", import.meta.url)));
+  await assert.rejects(access(new URL("../.openai/hosting.json", import.meta.url)));
 });
