@@ -18,7 +18,7 @@ export async function generateMetadata(): Promise<Metadata> {
   const host = requestHeaders.get("x-forwarded-host") ?? requestHeaders.get("host") ?? "localhost";
   const protocol = requestHeaders.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
   const origin = `${protocol}://${host}`;
-  const title = "炭火里 · 智慧烧烤点餐系统";
+  const title = "Edison 爱吃烧烤";
   const description = "单门店烧烤点餐、接单与经营分析系统。";
   return {
     title,
@@ -28,13 +28,11 @@ export async function generateMetadata(): Promise<Metadata> {
       description,
       type: "website",
       url: origin,
-      images: [{ url: `${origin}/og-v2.png`, width: 1200, height: 630, alt: "炭火里智慧烧烤点餐系统" }],
     },
     twitter: {
-      card: "summary_large_image",
+      card: "summary",
       title,
       description,
-      images: [`${origin}/og-v2.png`],
     },
   };
 }

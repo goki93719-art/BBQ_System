@@ -267,6 +267,43 @@ async function currentCart(db: D1Database, requested: Row[]) {
 
 async function handleAuth(db: D1Database, request: Request, segments: string[]) {
   const action = segments[1];
+  if (request.method === "POST" && action === "code" && segments[2] === "login") {
+    const body = await readBody(request);
+    const phone = normalizePhone(body.phone);
+    if (!phone || typeof body.code !== "string") {
+      throw new ApiError(400, "INVALID_AUTH_INPUT", "请输入正确的手机号和验证码。");
+    }
+    if (body.code !== "9999") {
+      throw new ApiError(422, "INVALID_SMS_CODE", "验证码错误，请输入测试验证码 9999。");
+    }
+    let user = await db.prepare("SELECT * FROM users WHERE phone_normalized = ?").bind(phone).first<Row>();
+    if (user && user.status !== "ACTIVE") {
+      throw new ApiError(403, "ACCOUNT_DISABLED", "该账号已停用，请联系门店。");
+    }
+    let created = false;
+    if (!user) {
+      const id = crypto.randomUUID();
+      const nickname = "炭火好友";
+      const now = new Date().toISOString();
+      try {
+        await db.prepare("INSERT INTO users VALUES (?, ?, ?, ?, ?, 'ACTIVE', ?)").bind(
+          id, STORE_ID, phone, await hashPassword(randomToken()), nickname, now,
+        ).run();
+        user = { id, phone_normalized: phone, nickname, status: "ACTIVE" };
+        created = true;
+      } catch {
+        user = await db.prepare("SELECT * FROM users WHERE phone_normalized = ? AND status = 'ACTIVE'").bind(phone).first<Row>();
+        if (!user) throw new ApiError(409, "ACCOUNT_CREATE_FAILED", "账号创建失败，请稍后重试。");
+      }
+    }
+    const token = await createSession(db, "CUSTOMER", user.id);
+    return success(
+      { user: publicCustomer(user), auto_registered: created },
+      created ? 201 : 200,
+      { "Set-Cookie": sessionCookie("customer_session", token) },
+    );
+  }
+
   if (request.method === "POST" && action === "sms" && segments[2] === "request") {
     const body = await readBody(request);
     const phone = normalizePhone(body.phone);

@@ -46,8 +46,8 @@ const statusText: Record<string, string> = {
 function Brand({ compact = false }: { compact?: boolean }) {
   return (
     <div className={`brand ${compact ? "brand-compact" : ""}`}>
-      <span className="brand-mark">炭</span>
-      <span><strong>炭火里</strong><small>GRILL & GOOD TIMES</small></span>
+      <span className="brand-mark">E</span>
+      <span><strong>Edison 爱吃烧烤</strong><small>GRILL & GOOD TIMES</small></span>
     </div>
   );
 }
@@ -229,13 +229,8 @@ function TrendLineChart({ rows, scope }: { rows: Json[]; scope: "year" | "month"
 }
 
 function CustomerAuth({ onLogin }: { onLogin: (user: Json) => void }) {
-  const [method, setMethod] = useState<"password" | "sms">("password");
   const [phone, setPhone] = useState("13800138000");
-  const [password, setPassword] = useState("grill1234");
   const [code, setCode] = useState("9999");
-  const [challengeId, setChallengeId] = useState("");
-  const [registrationToken, setRegistrationToken] = useState("");
-  const [nickname, setNickname] = useState("炭火好友");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -244,44 +239,13 @@ function CustomerAuth({ onLogin }: { onLogin: (user: Json) => void }) {
     setBusy(true);
     setMessage("");
     try {
-      if (registrationToken) {
-        const data = await api("/api/auth/register", {
-          method: "POST",
-          body: JSON.stringify({ phone, password, nickname, registrationToken }),
-        });
-        onLogin(data.user);
-      } else if (method === "password") {
-        const data = await api("/api/auth/password/login", {
-          method: "POST",
-          body: JSON.stringify({ phone, password }),
-        });
-        onLogin(data.user);
-      } else {
-        if (!challengeId) throw new Error("请先获取验证码");
-        const data = await api("/api/auth/sms/login", {
-          method: "POST",
-          body: JSON.stringify({ phone, challengeId, code }),
-        });
-        if (data.need_register) {
-          setRegistrationToken(data.registration_token);
-          setMessage("手机号验证成功，请设置密码完成注册。");
-        } else onLogin(data.user);
-      }
+      const data = await api("/api/auth/code/login", {
+        method: "POST",
+        body: JSON.stringify({ phone, code }),
+      });
+      onLogin(data.user);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "登录失败");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function requestCode() {
-    setBusy(true);
-    try {
-      const data = await api("/api/auth/sms/request", { method: "POST", body: JSON.stringify({ phone }) });
-      setChallengeId(data.challenge_id);
-      setMessage("验证码已发送，测试码为 9999。");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "发送失败");
     } finally {
       setBusy(false);
     }
@@ -299,25 +263,14 @@ function CustomerAuth({ onLogin }: { onLogin: (user: Json) => void }) {
       <form className="auth-card" onSubmit={submit}>
         <Brand />
         <div className="auth-title">
-          <p className="eyebrow">{registrationToken ? "新客注册" : "欢迎回来"}</p>
-          <h2>{registrationToken ? "设置你的登录密码" : "先登录，再开吃"}</h2>
+          <p className="eyebrow">欢迎回来</p>
+          <h2>先登录，再开吃</h2>
         </div>
-        {!registrationToken && (
-          <div className="segmented">
-            <button type="button" className={method === "password" ? "active" : ""} onClick={() => setMethod("password")}>密码登录</button>
-            <button type="button" className={method === "sms" ? "active" : ""} onClick={() => setMethod("sms")}>验证码登录</button>
-          </div>
-        )}
-        <label>手机号<input value={phone} onChange={(event) => setPhone(event.target.value)} inputMode="tel" /></label>
-        {registrationToken && <label>昵称<input value={nickname} onChange={(event) => setNickname(event.target.value)} maxLength={20} /></label>}
-        {method === "password" || registrationToken ? (
-          <label>密码<input value={password} onChange={(event) => setPassword(event.target.value)} type="password" placeholder="8–20 位，包含字母和数字" /></label>
-        ) : (
-          <label>验证码<span className="field-row"><input value={code} onChange={(event) => setCode(event.target.value)} inputMode="numeric" maxLength={4} /><button type="button" className="ghost-button" onClick={requestCode} disabled={busy}>获取验证码</button></span></label>
-        )}
+        <label>账号（手机号）<input value={phone} onChange={(event) => setPhone(event.target.value)} inputMode="tel" autoComplete="username" /></label>
+        <label>验证码<input value={code} onChange={(event) => setCode(event.target.value)} inputMode="numeric" autoComplete="one-time-code" maxLength={4} /></label>
         {message && <p className="form-message">{message}</p>}
-        <button className="primary-button wide" disabled={busy}>{busy ? "请稍候…" : registrationToken ? "注册并进入菜单" : "登录并开始点餐"}</button>
-        <p className="demo-tip">演示账号 13800138000 / grill1234 · Mock 验证码 9999</p>
+        <button className="primary-button wide" disabled={busy}>{busy ? "请稍候…" : "登录并开始点餐"}</button>
+        <p className="demo-tip">测试版固定验证码：9999，无需获取验证码；新账号首次登录会自动创建。</p>
       </form>
     </section>
   );
@@ -410,9 +363,10 @@ function CustomerApp({ user, onLogout }: { user: Json; onLogout: () => void }) {
   const cartLines = Object.values(cart);
   const cartCount = cartLines.reduce((sum, line) => sum + line.quantity, 0);
   const invalidCartLines = cartLines.filter((line) => line.invalid);
+  const validCartLines = cartLines.filter((line) => !line.invalid);
   const cartTotal = cartLines.reduce((sum, line) => sum + (line.invalid ? 0 : line.price_cent * line.quantity), 0);
   const activeCategory = menu.categories.find((category: Json) => category.id === categoryId) ?? menu.categories[0];
-  const missingGroups = missingBalanceGroups(cartLines);
+  const missingGroups = missingBalanceGroups(validCartLines);
   const selectedUnitPrice = selectedItem
     ? priceForSelection(selectedItem.price_cent, selectedItem.business_type, draftSelection)
     : 0;
@@ -502,10 +456,12 @@ function CustomerApp({ user, onLogout }: { user: Json; onLogout: () => void }) {
       const apiError = error as Error & { code?: string; details?: Json };
       if (apiError.code === "CART_CHANGED" && apiError.details) {
         const next: Record<string, Json> = {};
+        let unavailableCount = 0;
         for (const line of apiError.details.items ?? []) {
           const key = line.line_key ?? cartLineKey(line.item_id, line.selection);
           const original = cart[key];
           if (original) {
+            if (!line.available) unavailableCount += 1;
             next[key] = {
               ...original,
               name: line.name ?? original.name,
@@ -514,12 +470,16 @@ function CustomerApp({ user, onLogout }: { user: Json; onLogout: () => void }) {
               selection: line.selection ?? original.selection,
               selection_label: line.selection_label ?? original.selection_label,
               invalid: !line.available,
-              invalidReason: line.reason,
+              invalidReason: line.reason || "商品已失效",
             };
           }
         }
         setCart(next);
-        setQuote({ token: apiError.details.quote_token, requestId });
+        setQuote(unavailableCount ? null : { token: apiError.details.quote_token, requestId });
+        setMessage(unavailableCount
+          ? `检测到 ${unavailableCount} 种商品已售罄或失效，已标记并从合计中扣除。`
+          : apiError.message);
+        return;
       }
       setMessage(apiError.message);
     }
@@ -707,6 +667,7 @@ function CustomerApp({ user, onLogout }: { user: Json; onLogout: () => void }) {
               {!cartLines.length && <div className="empty-state">还没选好吃的，去菜单逛逛。</div>}
               {cartLines.map((line) => <div className={`cart-line ${line.invalid ? "invalid" : ""}`} key={line.lineKey}><span className="cart-icon">{line.image_url}</span><div><strong>{line.name}</strong>{line.selection_label && <em>{line.selection_label}</em>}<small>{line.invalid ? `失效：${line.invalidReason}` : money(line.price_cent)}</small>{line.invalid && <button className="remove-invalid" onClick={() => changeQuantity(line.lineKey, -line.quantity)}>移除失效商品</button>}</div><div className="stepper"><button aria-label={`减少一份${line.name}`} disabled={line.invalid} onClick={() => changeQuantity(line.lineKey, -1)}>−</button><b>{line.quantity}</b><button aria-label={`增加一份${line.name}`} disabled={line.invalid} onClick={() => changeQuantity(line.lineKey, 1)}>+</button></div></div>)}
             </div>
+            {!!invalidCartLines.length && <div className="cart-stock-alert" role="alert"><strong>购物车有 {invalidCartLines.length} 种失效商品</strong><span>商品可能已售罄或下架，已自动从合计金额中扣除，请移除后再提交。</span></div>}
             <label className="note-field">订单备注<textarea value={note} onChange={(event) => setNote(event.target.value)} maxLength={200} placeholder="例如：少辣、不要香菜" /></label>
             {!!cartLines.length && (
               <div className={`balance-tip ${missingGroups.length ? "" : "complete"}`}>
@@ -959,7 +920,19 @@ function AdminApp({ admin, onLogout }: { admin: Json; onLogout: () => void }) {
         {tab === "menu" && <>
           <div className="admin-title"><div><p className="eyebrow">MENU CONTROL</p><h1>菜单管理</h1><p>店长操作会写入审计日志，历史订单始终保留快照。</p></div>{manager && <span className="button-row"><button className="ghost-button" onClick={addCategory}>新增品类</button><button className="primary-button" onClick={addItem}>新增商品</button></span>}</div>
           <section className="admin-panel"><header><h2>品类</h2><span>{categories.length} 个品类</span></header><div className="category-admin-grid">{categories.map((category) => <div key={category.id}><span className="category-icon">{category.name.slice(0, 1)}</span><span><strong>{category.name}</strong><small>{category.code} · V{category.version}</small></span><button aria-label={`${category.status === "ENABLED" ? "停用" : "启用"}品类${category.name}`} aria-pressed={category.status === "ENABLED"} disabled={!manager} onClick={() => toggleCategory(category)} className={category.status === "ENABLED" ? "switch on" : "switch"}><i /></button></div>)}</div></section>
-          <section className="admin-panel compact-table"><header><h2>商品</h2><span>{items.length} 道在库商品</span></header>{items.map((item) => <div className="table-row menu-row" key={item.id}><span className="table-food">{item.image_url}</span><span><b>{item.name}</b><small>{item.category_name} · {item.sku}</small></span><strong>{money(item.price_cent)}</strong><button aria-pressed={item.sold_out} disabled={!manager} className={item.sold_out ? "chip danger" : "chip"} onClick={() => toggleItem(item, "soldOut")}>{item.sold_out ? "已售罄" : "有库存"}</button><button aria-label={`${item.status === "ACTIVE" ? "下架" : "上架"}${item.name}`} aria-pressed={item.status === "ACTIVE"} disabled={!manager} className={item.status === "ACTIVE" ? "switch on" : "switch"} onClick={() => toggleItem(item, "status")}><i /></button></div>)}</section>
+          <section className="admin-panel compact-table product-table">
+            <header><h2>商品</h2><span>{items.length} 道在库商品</span></header>
+            <div className="menu-table-head" aria-hidden="true"><span>商品名称</span><span>品类</span><span>单价</span><span>上下架操作</span><span>库存操作</span></div>
+            {items.map((item) => (
+              <div className="table-row menu-row" key={item.id}>
+                <span className="menu-product-cell"><span className="table-food">{item.image_url}</span><span><b>{item.name}</b><small>{item.sku}</small></span></span>
+                <span className="menu-category-cell">{item.category_name}</span>
+                <strong className="menu-price">{money(item.price_cent)}</strong>
+                <button aria-label={`${item.status === "ACTIVE" ? "下架" : "上架"}${item.name}`} aria-pressed={item.status === "ACTIVE"} disabled={!manager} className={`menu-state-action listing-action ${item.status === "ACTIVE" ? "active" : "inactive"}`} onClick={() => toggleItem(item, "status")}><i />{item.status === "ACTIVE" ? "上架中" : "已下架"}</button>
+                <button aria-label={`${item.sold_out ? "恢复库存" : "设为售罄"}${item.name}`} aria-pressed={item.sold_out} disabled={!manager} className={`menu-state-action inventory-action ${item.sold_out ? "sold-out" : "available"}`} onClick={() => toggleItem(item, "soldOut")}><i />{item.sold_out ? "已售罄" : "有库存"}</button>
+              </div>
+            ))}
+          </section>
         </>}
 
         {tab === "analytics" && <>

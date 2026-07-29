@@ -23,9 +23,9 @@ async function call(path, { method = "GET", body, cookie } = {}) {
   return { status: response.status, payload, cookie: cookieFrom(response) };
 }
 
-const customerLogin = await call("/api/auth/password/login", {
+const customerLogin = await call("/api/auth/code/login", {
   method: "POST",
-  body: { phone: "13800138000", password: "grill1234" },
+  body: { phone: "13800138000", code: "9999" },
 });
 const managerLogin = await call("/api/admin/auth/login", {
   method: "POST",

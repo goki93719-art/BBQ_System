@@ -223,6 +223,14 @@ async function initialize() {
         db.prepare("INSERT OR REPLACE INTO app_meta VALUES (?, ?)").bind("seed_v2", now),
       ]);
     }
+    const brandUpdated = await db.prepare("SELECT value FROM app_meta WHERE key = ?").bind("seed_v5").first();
+    if (!brandUpdated) {
+      const now = new Date().toISOString();
+      await db.batch([
+        db.prepare("UPDATE stores SET name = ? WHERE id = ?").bind("Edison 爱吃烧烤", STORE_ID),
+        db.prepare("INSERT OR REPLACE INTO app_meta VALUES (?, ?)").bind("seed_v5", now),
+      ]);
+    }
     await seedHistoricalData(db);
     return;
   }
@@ -233,7 +241,7 @@ async function initialize() {
     hashPassword("Operator123"),
   ]);
   const statements = [
-    db.prepare("INSERT OR IGNORE INTO stores VALUES (?, ?, ?, ?, ?)").bind(STORE_ID, "炭火里烧烤", "Asia/Shanghai", "CNY", "上海市烟火路 88 号"),
+    db.prepare("INSERT OR IGNORE INTO stores VALUES (?, ?, ?, ?, ?)").bind(STORE_ID, "Edison 爱吃烧烤", "Asia/Shanghai", "CNY", "上海市烟火路 88 号"),
     db.prepare("INSERT OR IGNORE INTO users VALUES (?, ?, ?, ?, ?, ?, ?)").bind("user-demo", STORE_ID, "13800138000", customerHash, "炭火好友", "ACTIVE", now),
     db.prepare("INSERT OR IGNORE INTO admin_users VALUES (?, ?, ?, ?, ?, ?, ?)").bind("admin-manager", STORE_ID, "manager", managerHash, "林店长", "MANAGER", "ACTIVE"),
     db.prepare("INSERT OR IGNORE INTO admin_users VALUES (?, ?, ?, ?, ?, ?, ?)").bind("admin-operator", STORE_ID, "operator", operatorHash, "小陈", "OPERATOR", "ACTIVE"),
@@ -251,6 +259,7 @@ async function initialize() {
   statements.push(db.prepare("INSERT OR REPLACE INTO app_meta VALUES (?, ?)").bind("seed_v1", now));
   statements.push(db.prepare("INSERT OR REPLACE INTO app_meta VALUES (?, ?)").bind("seed_v2", now));
   statements.push(db.prepare("INSERT OR REPLACE INTO app_meta VALUES (?, ?)").bind("seed_v3", now));
+  statements.push(db.prepare("INSERT OR REPLACE INTO app_meta VALUES (?, ?)").bind("seed_v5", now));
   await db.batch(statements);
   await seedHistoricalData(db);
 }
