@@ -435,6 +435,16 @@ function CustomerApp({ user, onLogout }: { user: Json; onLogout: () => void }) {
     setQuote(null);
   }
 
+  function clearCart() {
+    if (!cartLines.length) return;
+    setCart({});
+    setQuote(null);
+    setNote("");
+    setCartOpen(false);
+    setMessage("购物车已清空");
+    window.setTimeout(() => setMessage(""), 1500);
+  }
+
   async function submitOrder(confirmQuote = false) {
     if (!cartLines.length) return;
     if (invalidCartLines.length) {
@@ -636,7 +646,7 @@ function CustomerApp({ user, onLogout }: { user: Json; onLogout: () => void }) {
       {cartOpen && (
         <div className="drawer-backdrop" onClick={() => setCartOpen(false)}>
           <aside className="cart-drawer" onClick={(event) => event.stopPropagation()}>
-            <header><div><p className="eyebrow">YOUR CART</p><h2>购物车</h2></div><button onClick={() => setCartOpen(false)}>×</button></header>
+            <header><div><p className="eyebrow">YOUR CART</p><h2>购物车</h2></div><div className="cart-header-actions">{!!cartLines.length && <button className="clear-cart" aria-label="一键清空购物车" onClick={clearCart}>清空</button>}<button className="cart-close" aria-label="关闭购物车" onClick={() => setCartOpen(false)}>×</button></div></header>
             <div className="cart-lines">
               {!cartLines.length && <div className="empty-state">还没选好吃的，去菜单逛逛。</div>}
               {cartLines.map((line) => <div className={`cart-line ${line.invalid ? "invalid" : ""}`} key={line.lineKey}><span className="cart-icon">{line.image_url}</span><div><strong>{line.name}</strong>{line.selection_label && <em>{line.selection_label}</em>}<small>{line.invalid ? `失效：${line.invalidReason}` : money(line.price_cent)}</small>{line.invalid && <button className="remove-invalid" onClick={() => changeQuantity(line.lineKey, -line.quantity)}>移除失效商品</button>}</div><div className="stepper"><button disabled={line.invalid} onClick={() => changeQuantity(line.lineKey, -1)}>−</button><b>{line.quantity}</b><button disabled={line.invalid} onClick={() => changeQuantity(line.lineKey, 1)}>+</button></div></div>)}

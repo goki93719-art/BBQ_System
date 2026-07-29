@@ -15,6 +15,7 @@ test("finished product metadata and starter cleanup are present", async () => {
   assert.match(layout, /lang="zh-CN"/);
   assert.match(page, /<GrillApp \/>/);
   assert.match(app, /一键重订/);
+  assert.match(app, /一键清空购物车/);
   assert.match(app, /搭配小提示/);
   assert.match(app, /近一年订单记录/);
   assert.match(app, /今日待处理/);
