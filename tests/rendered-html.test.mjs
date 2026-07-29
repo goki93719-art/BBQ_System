@@ -11,7 +11,7 @@ test("finished product metadata and starter cleanup are present", async () => {
     readFile(new URL("../package.json", import.meta.url), "utf8"),
     readFile(new URL("../.openai/hosting.json", import.meta.url), "utf8"),
   ]);
-  assert.match(layout, /炭火里 · 智慧点餐/);
+  assert.match(layout, /炭火里 · 智慧烧烤点餐系统/);
   assert.match(layout, /lang="zh-CN"/);
   assert.match(page, /<GrillApp \/>/);
   assert.match(app, /一键重订/);
