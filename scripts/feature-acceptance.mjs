@@ -137,13 +137,50 @@ if (linkOrder.status === 201) {
   await call(`/api/orders/${linkOrder.payload.data.order.id}/cancel`, { method: "POST", body: {}, cookie: customerCookie });
 }
 
-const analytics = await call("/api/admin/analytics?period=month", { cookie: managerCookie });
+const chinaParts = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Asia/Shanghai",
+  year: "numeric",
+  month: "2-digit",
+}).formatToParts(new Date());
+const analyticsYear = chinaParts.find((part) => part.type === "year").value;
+const analyticsMonth = chinaParts.find((part) => part.type === "month").value;
+const analytics = await call(`/api/admin/analytics?year=${analyticsYear}&month=${analyticsMonth}`, { cookie: managerCookie });
 record(
   "销售看板历史数据",
   analytics.status === 200 &&
+    analytics.payload.data?.scope === "month" &&
     analytics.payload.data?.summary?.order_count > 0 &&
-    analytics.payload.data?.top_items?.length > 0,
-  `orders=${analytics.payload.data?.summary?.order_count}, top_items=${analytics.payload.data?.top_items?.length}`,
+    analytics.payload.data?.top_items?.length > 0 &&
+    analytics.payload.data?.trend?.length >= 28,
+  `scope=${analytics.payload.data?.scope}, orders=${analytics.payload.data?.summary?.order_count}, trend=${analytics.payload.data?.trend?.length}`,
+);
+
+const yearlyAnalytics = await call(`/api/admin/analytics?year=${analyticsYear}`, { cookie: managerCookie });
+record(
+  "年度月份聚合",
+  yearlyAnalytics.status === 200 &&
+    yearlyAnalytics.payload.data?.scope === "year" &&
+    yearlyAnalytics.payload.data?.trend?.length === 12 &&
+    yearlyAnalytics.payload.data?.trend?.every((row) => /^\d{4}-\d{2}$/.test(row.bucket)),
+  `scope=${yearlyAnalytics.payload.data?.scope}, buckets=${yearlyAnalytics.payload.data?.trend?.length}`,
+);
+
+const historyDefault = await call("/api/admin/orders?view=history&page=1", { cookie: managerCookie });
+const history10 = await call("/api/admin/orders?view=history&page=1&page_size=10", { cookie: managerCookie });
+const history20 = await call("/api/admin/orders?view=history&page=1&page_size=20", { cookie: managerCookie });
+const historyItems = history10.payload.data?.items ?? [];
+record(
+  "近一年订单倒序分页",
+  history10.status === 200 &&
+    historyDefault.payload.data?.page_size === 10 &&
+    history10.payload.data?.page_size === 10 &&
+    historyItems.length <= 10 &&
+    historyItems.every((order) => order.status !== "PENDING_CONFIRM") &&
+    historyItems.every((order) => order.submitted_at >= history10.payload.data?.retention_start) &&
+    historyItems.every((order, index) => index === 0 || order.submitted_at <= historyItems[index - 1].submitted_at) &&
+    history20.payload.data?.page_size === 20 &&
+    history20.payload.data?.total === history10.payload.data?.total,
+  `total=${history10.payload.data?.total}, page10=${historyItems.length}, page20=${history20.payload.data?.items?.length}`,
 );
 
 const summary = {

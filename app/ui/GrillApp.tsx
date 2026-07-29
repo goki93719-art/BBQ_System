@@ -1,7 +1,7 @@
 "use client";
 /* eslint-disable @typescript-eslint/no-explicit-any, react-hooks/set-state-in-effect */
 
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import {
   cartLineKey,
   missingBalanceGroups,
@@ -28,6 +28,13 @@ async function api(path: string, options: RequestInit = {}) {
 
 const money = (cent: number) => `¥${(Number(cent || 0) / 100).toFixed(2)}`;
 const dateTime = (value: string) => new Date(value).toLocaleString("zh-CN", { hour12: false });
+const analyticsNow = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Asia/Shanghai",
+  year: "numeric",
+  month: "2-digit",
+}).formatToParts(new Date());
+const defaultAnalyticsYear = Number(analyticsNow.find((part) => part.type === "year")?.value);
+const defaultAnalyticsMonth = analyticsNow.find((part) => part.type === "month")?.value ?? "01";
 const statusText: Record<string, string> = {
   PENDING_CONFIRM: "待商家确认",
   CONFIRMED: "已确认",
@@ -48,6 +55,127 @@ function Brand({ compact = false }: { compact?: boolean }) {
 function Toast({ message, tone = "dark" }: { message: string; tone?: string }) {
   if (!message) return null;
   return <div className={`toast toast-${tone}`} role="status">{message}</div>;
+}
+
+function TrendLineChart({ rows, scope }: { rows: Json[]; scope: "year" | "month" }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const hasData = rows.some((row) => Number(row.amount_cent) > 0);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !hasData) return;
+
+    const draw = () => {
+      const width = Math.max(320, Math.floor(canvas.getBoundingClientRect().width));
+      const height = 300;
+      const ratio = Math.max(1, window.devicePixelRatio || 1);
+      canvas.width = width * ratio;
+      canvas.height = height * ratio;
+      const context = canvas.getContext("2d");
+      if (!context) return;
+      context.scale(ratio, ratio);
+      context.clearRect(0, 0, width, height);
+
+      const padding = { top: 26, right: 22, bottom: 48, left: 66 };
+      const chartWidth = width - padding.left - padding.right;
+      const chartHeight = height - padding.top - padding.bottom;
+      const values = rows.map((row) => Number(row.amount_cent ?? 0));
+      const maximum = Math.max(1, ...values);
+
+      context.font = '11px "PingFang SC", sans-serif';
+      context.textBaseline = "middle";
+      for (let index = 0; index <= 4; index += 1) {
+        const y = padding.top + chartHeight * index / 4;
+        const value = maximum * (4 - index) / 4;
+        context.beginPath();
+        context.strokeStyle = "#e8e2d7";
+        context.lineWidth = 1;
+        context.moveTo(padding.left, y);
+        context.lineTo(width - padding.right, y);
+        context.stroke();
+        context.fillStyle = "#777c73";
+        context.textAlign = "right";
+        context.fillText(`¥${(value / 100).toFixed(value >= 100000 ? 0 : 2)}`, padding.left - 10, y);
+      }
+
+      const pointFor = (value: number, index: number) => ({
+        x: padding.left + chartWidth * index / Math.max(1, rows.length - 1),
+        y: padding.top + chartHeight - value / maximum * chartHeight,
+      });
+      const gradient = context.createLinearGradient(0, padding.top, 0, padding.top + chartHeight);
+      gradient.addColorStop(0, "rgba(228,81,50,.22)");
+      gradient.addColorStop(1, "rgba(228,81,50,0)");
+      context.beginPath();
+      values.forEach((value, index) => {
+        const point = pointFor(value, index);
+        if (index === 0) context.moveTo(point.x, point.y);
+        else context.lineTo(point.x, point.y);
+      });
+      const last = pointFor(values.at(-1) ?? 0, values.length - 1);
+      const first = pointFor(values[0] ?? 0, 0);
+      context.lineTo(last.x, padding.top + chartHeight);
+      context.lineTo(first.x, padding.top + chartHeight);
+      context.closePath();
+      context.fillStyle = gradient;
+      context.fill();
+
+      context.beginPath();
+      values.forEach((value, index) => {
+        const point = pointFor(value, index);
+        if (index === 0) context.moveTo(point.x, point.y);
+        else context.lineTo(point.x, point.y);
+      });
+      context.strokeStyle = "#e45132";
+      context.lineWidth = 3;
+      context.lineJoin = "round";
+      context.lineCap = "round";
+      context.stroke();
+
+      values.forEach((value, index) => {
+        const point = pointFor(value, index);
+        context.beginPath();
+        context.fillStyle = "#fffdf8";
+        context.strokeStyle = "#e45132";
+        context.lineWidth = 2;
+        context.arc(point.x, point.y, value > 0 ? 4 : 2.5, 0, Math.PI * 2);
+        context.fill();
+        context.stroke();
+      });
+
+      const labelStep = scope === "year" ? 1 : Math.max(1, Math.ceil(rows.length / 8));
+      rows.forEach((row, index) => {
+        if (index % labelStep !== 0 && index !== rows.length - 1) return;
+        const point = pointFor(values[index], index);
+        const parts = String(row.bucket).split("-");
+        const label = scope === "year" ? `${Number(parts[1])}月` : `${Number(parts[2])}日`;
+        context.fillStyle = "#777c73";
+        context.textAlign = "center";
+        context.fillText(label, point.x, height - 22);
+      });
+    };
+
+    draw();
+    const observer = new ResizeObserver(draw);
+    observer.observe(canvas);
+    return () => observer.disconnect();
+  }, [hasData, rows, scope]);
+
+  if (!hasData) return <div className="trend-empty">所选周期暂无已确认订单</div>;
+  const total = rows.reduce((sum, row) => sum + Number(row.amount_cent ?? 0), 0);
+  const peak = rows.reduce((current, row) => Number(row.amount_cent) > Number(current?.amount_cent ?? -1) ? row : current, rows[0]);
+  return (
+    <div className="trend-chart">
+      <div className="trend-summary">
+        <span>周期确认金额 <strong>{money(total)}</strong></span>
+        <span>峰值 <strong>{peak ? money(peak.amount_cent) : "—"}</strong></span>
+      </div>
+      <canvas
+        ref={canvasRef}
+        aria-label={`${scope === "year" ? "年度月度" : "月度每日"}确认金额折线图`}
+        role="img"
+      />
+    </div>
+  );
 }
 
 function CustomerAuth({ onLogin }: { onLogin: (user: Json) => void }) {
@@ -529,28 +657,47 @@ function AdminLogin({ onLogin }: { onLogin: (admin: Json) => void }) {
 
 function AdminApp({ admin, onLogout }: { admin: Json; onLogout: () => void }) {
   const [tab, setTab] = useState<"orders" | "menu" | "analytics" | "audit">("orders");
-  const [orders, setOrders] = useState<Json[]>([]);
+  const [pendingOrders, setPendingOrders] = useState<Json[]>([]);
+  const [orderHistory, setOrderHistory] = useState<Json[]>([]);
+  const [orderPage, setOrderPage] = useState(1);
+  const [orderPageSize, setOrderPageSize] = useState(10);
+  const [orderTotal, setOrderTotal] = useState(0);
+  const [orderTotalPages, setOrderTotalPages] = useState(1);
+  const [orderSummary, setOrderSummary] = useState<Json>({ confirmed_count: 0, confirmed_amount_cent: 0 });
   const [categories, setCategories] = useState<Json[]>([]);
   const [items, setItems] = useState<Json[]>([]);
   const [analytics, setAnalytics] = useState<Json>({ summary: {}, top_items: [], trend: [] });
   const [audits, setAudits] = useState<Json[]>([]);
-  const [period, setPeriod] = useState("today");
+  const [analyticsYear, setAnalyticsYear] = useState(defaultAnalyticsYear);
+  const [analyticsMonth, setAnalyticsMonth] = useState(defaultAnalyticsMonth);
   const [message, setMessage] = useState("");
   const manager = admin.role === "MANAGER";
 
   const loadOrders = useCallback(async () => {
-    const data = await api("/api/admin/orders?page_size=100");
-    setOrders(data.items);
-  }, []);
+    const [pendingData, historyData] = await Promise.all([
+      api("/api/admin/orders?status=PENDING_CONFIRM&page_size=100"),
+      api(`/api/admin/orders?view=history&page=${orderPage}&page_size=${orderPageSize}`),
+    ]);
+    setPendingOrders(pendingData.items);
+    setOrderHistory(historyData.items);
+    setOrderPage(historyData.page);
+    setOrderTotal(historyData.total);
+    setOrderTotalPages(historyData.total_pages);
+    setOrderSummary(historyData.summary);
+  }, [orderPage, orderPageSize]);
   const loadMenu = useCallback(async () => {
     const [categoryData, itemData] = await Promise.all([api("/api/admin/categories?page_size=100"), api("/api/admin/items?page_size=100")]);
     setCategories(categoryData.items);
     setItems(itemData.items);
   }, []);
   const loadAnalytics = useCallback(async () => {
-    const data = await api(`/api/admin/analytics?period=${period}`);
+    const data = await api(
+      manager
+        ? `/api/admin/analytics?year=${analyticsYear}${analyticsMonth ? `&month=${analyticsMonth}` : ""}`
+        : "/api/admin/analytics",
+    );
     setAnalytics(data);
-  }, [period]);
+  }, [analyticsMonth, analyticsYear, manager]);
   const loadAudits = useCallback(async () => {
     if (!manager) return;
     const data = await api("/api/admin/audits?page_size=100");
@@ -571,10 +718,8 @@ function AdminApp({ admin, onLogout }: { admin: Json; onLogout: () => void }) {
     };
   }, [loadOrders]);
   useEffect(() => { if (tab === "menu") void loadMenu(); if (tab === "analytics") void loadAnalytics(); if (tab === "audit") void loadAudits(); }, [tab, loadMenu, loadAnalytics, loadAudits]);
-  useEffect(() => { if (tab === "analytics") void loadAnalytics(); }, [period, tab, loadAnalytics]);
 
-  const pending = orders.filter((order) => order.status === "PENDING_CONFIRM");
-  const todayConfirmed = orders.filter((order) => order.status === "CONFIRMED");
+  const pending = pendingOrders;
 
   async function process(order: Json, action: "confirm" | "reject" | "void") {
     try {
@@ -657,14 +802,32 @@ function AdminApp({ admin, onLogout }: { admin: Json; onLogout: () => void }) {
       <main className="admin-main">
         {tab === "orders" && <>
           <div className="admin-title"><div><p className="eyebrow">ORDER DESK</p><h1>订单中心</h1><p>新订单每 3 秒自动刷新，先确认备注，再稳稳接单。</p></div><button className="ghost-button" onClick={loadOrders}>立即刷新</button></div>
-          <div className="admin-metrics"><div><span>待处理</span><strong>{pending.length}</strong><small>需要关注</small></div><div><span>已确认</span><strong>{todayConfirmed.length}</strong><small>当前列表</small></div><div><span>订单总额</span><strong>{money(todayConfirmed.reduce((sum, order) => sum + order.total_cent, 0))}</strong><small>未扣作废</small></div></div>
+          <div className="admin-metrics"><div><span>待处理</span><strong>{pending.length}</strong><small>需要关注</small></div><div><span>近一年已确认</span><strong>{orderSummary.confirmed_count ?? 0}</strong><small>按订单时间统计</small></div><div><span>近一年确认金额</span><strong>{money(orderSummary.confirmed_amount_cent)}</strong><small>已排除作废订单</small></div></div>
           <section className="admin-panel"><header><h2>待确认订单</h2><span>{pending.length} 单等待处理</span></header>
             <div className="admin-order-grid">
               {pending.length === 0 && <div className="empty-state">所有订单都已处理，干得漂亮。</div>}
               {pending.map((order) => <article className="admin-order" key={order.id}><header><div><strong>{order.order_no}</strong><small>{order.nickname} · {order.phone_masked}</small></div><time>{dateTime(order.submitted_at)}</time></header><div>{order.items.map((item: Json) => <p className={item.fulfillment_status === "SOLD_OUT" ? "sold-out-line" : ""} key={item.id}><span>{item.name_snapshot}{item.selection_label ? ` · ${item.selection_label}` : ""} × {item.quantity}{item.fulfillment_status === "SOLD_OUT" && <em>售罄 · 已移除</em>}</span><b>{money(item.subtotal_cent)}</b></p>)}</div>{order.note && <blockquote>备注：{order.note}</blockquote>}{order.removed_amount_cent > 0 && <div className="sold-out-summary">售罄商品已移除 {money(order.removed_amount_cent)}</div>}<footer><strong>{money(order.total_cent)}</strong><span><button className="outline-danger" onClick={() => process(order, "reject")}>拒绝</button><button className="primary-button" disabled={order.total_cent <= 0} onClick={() => process(order, "confirm")}>{order.total_cent > 0 ? "确认接单" : "请拒绝"}</button></span></footer></article>)}
             </div>
           </section>
-          <section className="admin-panel compact-table"><header><h2>近期订单</h2></header>{orders.filter((order) => order.status !== "PENDING_CONFIRM").slice(0, 12).map((order) => <div className="table-row" key={order.id}><span><b>{order.order_no}</b><small>{order.nickname} · {dateTime(order.submitted_at)}</small></span><span className={`status status-${order.status}`}>{statusText[order.status]}</span><strong>{money(order.total_cent)}</strong>{manager && order.status === "CONFIRMED" ? <button className="text-danger" onClick={() => process(order, "void")}>作废</button> : <i />}</div>)}</section>
+          <section className="admin-panel compact-table order-history">
+            <header className="order-history-header">
+              <div><h2>近一年订单记录</h2><span>共 {orderTotal} 条，按时间倒序</span></div>
+              <label>每页
+                <select value={orderPageSize} onChange={(event) => { setOrderPageSize(Number(event.target.value)); setOrderPage(1); }}>
+                  {[10, 20, 50].map((size) => <option value={size} key={size}>{size} 条</option>)}
+                </select>
+              </label>
+            </header>
+            {orderHistory.length === 0 && <div className="empty-state">近一年暂无已处理订单。</div>}
+            {orderHistory.map((order) => <div className="table-row" key={order.id}><span><b>{order.order_no}</b><small>{order.nickname} · {dateTime(order.submitted_at)}</small></span><span className={`status status-${order.status}`}>{statusText[order.status]}</span><strong>{money(order.total_cent)}</strong>{manager && order.status === "CONFIRMED" ? <button className="text-danger" onClick={() => process(order, "void")}>作废</button> : <i />}</div>)}
+            <footer className="order-pagination">
+              <span>第 {orderPage} / {orderTotalPages} 页</span>
+              <div>
+                <button disabled={orderPage <= 1} onClick={() => setOrderPage((page) => Math.max(1, page - 1))}>上一页</button>
+                <button disabled={orderPage >= orderTotalPages} onClick={() => setOrderPage((page) => Math.min(orderTotalPages, page + 1))}>下一页</button>
+              </div>
+            </footer>
+          </section>
         </>}
 
         {tab === "menu" && <>
@@ -674,10 +837,27 @@ function AdminApp({ admin, onLogout }: { admin: Json; onLogout: () => void }) {
         </>}
 
         {tab === "analytics" && <>
-          <div className="admin-title"><div><p className="eyebrow">BUSINESS PULSE</p><h1>经营分析</h1><p>{manager ? "确认金额、订单和热销贡献，以消费台账为唯一口径。" : "操作员仅可查看今日摘要。"}</p></div></div>
-          {manager && <div className="period-tabs admin-period">{["today", "week", "month", "year"].map((value) => <button key={value} className={period === value ? "active" : ""} onClick={() => setPeriod(value)}>{{ today: "今日", week: "本周", month: "本月", year: "本年" }[value]}</button>)}</div>}
+          <div className="admin-title"><div><p className="eyebrow">BUSINESS PULSE</p><h1>经营分析</h1><p>{manager ? "按年份或月份查看确认金额、订单与销售趋势。" : "操作员仅可查看今日摘要。"}</p></div></div>
+          {manager && <div className="analytics-filters">
+            <label>年份
+              <select value={analyticsYear} onChange={(event) => setAnalyticsYear(Number(event.target.value))}>
+                {(analytics.available_years ?? [analyticsYear]).map((year: number) => <option value={year} key={year}>{year} 年</option>)}
+              </select>
+            </label>
+            <label>月份
+              <select value={analyticsMonth} onChange={(event) => setAnalyticsMonth(event.target.value)}>
+                <option value="">全年（月度汇总）</option>
+                {Array.from({ length: 12 }, (_, index) => String(index + 1).padStart(2, "0")).map((month) => <option value={month} key={month}>{Number(month)} 月</option>)}
+              </select>
+            </label>
+            <span>{analyticsMonth ? `${analyticsYear} 年 ${Number(analyticsMonth)} 月 · 按日展示` : `${analyticsYear} 年 · 按月展示`}</span>
+          </div>}
           <div className="admin-metrics large"><div><span>确认金额</span><strong>{money(analytics.summary?.amount_cent)}</strong><small>已确认未作废</small></div><div><span>订单数</span><strong>{analytics.summary?.order_count ?? 0}</strong><small>消费台账</small></div><div><span>平均客单</span><strong>{analytics.summary?.average_cent == null ? "—" : money(analytics.summary.average_cent)}</strong><small>按订单计算</small></div><div><span>活跃顾客</span><strong>{analytics.summary?.active_customers ?? 0}</strong><small>去重用户</small></div></div>
-          <div className="analytics-grid"><section className="admin-panel"><header><h2>热销贡献</h2><span>按确认金额</span></header><div className="rank-list">{analytics.top_items?.map((item: Json, index: number) => <div key={item.item_id}><b>{String(index + 1).padStart(2, "0")}</b><span><strong>{item.name}</strong><small>{item.quantity} 份</small></span><em>{money(item.amount_cent)}</em></div>)}</div></section><section className="admin-panel"><header><h2>品类贡献</h2><span>金额占比</span></header><div className="contribution-list">{analytics.category_contribution?.map((category: Json) => <div key={category.category_id}><span><strong>{category.name}</strong><small>{money(category.amount_cent)}</small></span><div><i style={{ width: `${category.contribution_bps / 100}%` }} /></div><b>{(category.contribution_bps / 100).toFixed(1)}%</b></div>)}</div></section><section className="admin-panel"><header><h2>趋势明细</h2><span>{period === "today" ? "按小时" : period === "year" ? "按月" : "按营业日"} · 空桶补 0</span></header><div className="mini-bars">{analytics.trend?.map((bucket: Json) => <div key={bucket.bucket}><span><i style={{ height: `${Math.max(2, Math.min(100, bucket.amount_cent / Math.max(1, ...analytics.trend.map((row: Json) => row.amount_cent)) * 100))}%` }} /></span><small>{bucket.bucket.length > 5 ? bucket.bucket.slice(5) : bucket.bucket}</small></div>)}</div></section></div>
+          <div className="analytics-grid">
+            <section className="admin-panel"><header><h2>热销贡献</h2><span>按确认金额</span></header><div className="rank-list">{!analytics.top_items?.length && <div className="empty-state">所选周期暂无热销数据</div>}{analytics.top_items?.map((item: Json, index: number) => <div key={item.item_id}><b>{String(index + 1).padStart(2, "0")}</b><span><strong>{item.name}</strong><small>{item.quantity} 份</small></span><em>{money(item.amount_cent)}</em></div>)}</div></section>
+            <section className="admin-panel"><header><h2>品类贡献</h2><span>金额占比</span></header><div className="contribution-list">{!analytics.category_contribution?.length && <div className="empty-state">所选周期暂无品类数据</div>}{analytics.category_contribution?.map((category: Json) => <div key={category.category_id}><span><strong>{category.name}</strong><small>{money(category.amount_cent)}</small></span><div><i style={{ width: `${category.contribution_bps / 100}%` }} /></div><b>{(category.contribution_bps / 100).toFixed(1)}%</b></div>)}</div></section>
+            {manager && <section className="admin-panel trend-panel"><header><h2>销售趋势</h2><span>{analytics.scope === "year" ? "全年按月汇总" : "当月按日汇总"}</span></header><TrendLineChart rows={analytics.trend ?? []} scope={analytics.scope === "year" ? "year" : "month"} /></section>}
+          </div>
         </>}
 
         {tab === "audit" && <><div className="admin-title"><div><p className="eyebrow">AUDIT TRAIL</p><h1>审计日志</h1><p>管理写操作与订单状态变化不可物理删除。</p></div><button className="ghost-button" onClick={loadAudits}>刷新</button></div><section className="admin-panel compact-table audit-table">{audits.map((log) => <div className="table-row" key={log.id}><span><b>{log.action}</b><small>{log.entity_type} · {log.entity_id.slice(0, 12)}</small></span><span>{log.actor_name}<small>{log.actor_type}</small></span><span>{log.reason || "—"}</span><time>{dateTime(log.created_at)}</time></div>)}</section></>}

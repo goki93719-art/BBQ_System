@@ -16,12 +16,18 @@ test("finished product metadata and starter cleanup are present", async () => {
   assert.match(page, /<GrillApp \/>/);
   assert.match(app, /一键重订/);
   assert.match(app, /搭配小提示/);
+  assert.match(app, /近一年订单记录/);
+  assert.match(app, /\[10, 20, 50\]/);
+  assert.match(app, /TrendLineChart/);
+  assert.match(app, /全年（月度汇总）/);
   assert.match(app, /option-dialog/);
   assert.match(app, /月售/);
   assert.doesNotMatch(app, /className="attr-row"/);
   assert.doesNotMatch(app, /每500ML/);
+  assert.doesNotMatch(app, /空桶补 0|mini-bars|admin-period/);
   assert.match(styles, /@media \(max-width: 760px\)/);
   assert.match(styles, /\.option-dialog/);
+  assert.match(styles, /\.trend-panel \{ grid-column: 1 \/ -1; \}/);
   assert.match(styles, /\.capacity-values button strong \{ font-size: 16px; \}/);
   assert.doesNotMatch(`${layout}\n${page}\n${packageJson}`, /codex-preview|react-loading-skeleton|SkeletonPreview/);
   assert.deepEqual(JSON.parse(hosting), {

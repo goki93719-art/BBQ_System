@@ -72,20 +72,12 @@ function endDateExclusive() {
   return addDays(businessDate(new Date()), 1);
 }
 
-function fillTrend(period: string, start: string, end: string, rows: Row[]) {
+function fillCalendarTrend(scope: "year" | "month", start: string, end: string, rows: Row[]) {
   const values = new Map(rows.map((row) => [row.bucket, row]));
   const buckets: string[] = [];
-  if (period === "today") {
-    const hour = Number(new Intl.DateTimeFormat("en-US", {
-      timeZone: "Asia/Shanghai",
-      hour: "2-digit",
-      hourCycle: "h23",
-    }).format(new Date()));
-    for (let index = 0; index <= hour; index += 1) buckets.push(`${String(index).padStart(2, "0")}:00`);
-  } else if (period === "year") {
-    const currentMonth = businessDate(new Date()).slice(0, 7);
+  if (scope === "year") {
     let month = start.slice(0, 7);
-    while (month <= currentMonth) {
+    while (`${month}-01` < end) {
       buckets.push(month);
       const [year, value] = month.split("-").map(Number);
       const next = value === 12 ? [year + 1, 1] : [year, value + 1];
@@ -99,6 +91,23 @@ function fillTrend(period: string, start: string, end: string, rows: Row[]) {
     amount_cent: Number(values.get(bucket)?.amount_cent ?? 0),
     order_count: Number(values.get(bucket)?.order_count ?? 0),
   }));
+}
+
+function analyticsRange(year: number, month?: number) {
+  if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+    throw new ApiError(400, "INVALID_YEAR", "年份格式不正确。");
+  }
+  if (month !== undefined && (!Number.isInteger(month) || month < 1 || month > 12)) {
+    throw new ApiError(400, "INVALID_MONTH", "月份格式不正确。");
+  }
+  const start = `${year}-${String(month ?? 1).padStart(2, "0")}-01`;
+  const nextYear = month === 12 || month === undefined ? year + 1 : year;
+  const nextMonth = month === undefined || month === 12 ? 1 : month + 1;
+  return {
+    start,
+    end: `${nextYear}-${String(nextMonth).padStart(2, "0")}-01`,
+    scope: month === undefined ? "year" as const : "month" as const,
+  };
 }
 
 function pageParams(request: Request) {
@@ -701,6 +710,48 @@ async function adminOrders(db: D1Database, request: Request, segments: string[])
       return success({ order: updated, idempotent_replay: false });
     }
   }
+  if (request.method === "GET" && new URL(request.url).searchParams.get("view") === "history") {
+    const url = new URL(request.url);
+    const requestedPage = Math.max(1, Number(url.searchParams.get("page") ?? 1) || 1);
+    const requestedPageSize = Number(url.searchParams.get("page_size") ?? 10) || 10;
+    const pageSize = [10, 20, 50].includes(requestedPageSize) ? requestedPageSize : 10;
+    const retentionStart = new Date(Date.now() - 365 * 86400 * 1000).toISOString();
+    const summary = await db.prepare(
+      `SELECT COUNT(*) total,
+              SUM(CASE WHEN status = 'CONFIRMED' THEN 1 ELSE 0 END) confirmed_count,
+              COALESCE(SUM(CASE WHEN status = 'CONFIRMED' THEN total_cent ELSE 0 END), 0) confirmed_amount_cent
+       FROM orders
+       WHERE store_id = ? AND status <> 'PENDING_CONFIRM' AND submitted_at >= ?`,
+    ).bind(STORE_ID, retentionStart).first<Row>();
+    const total = Number(summary?.total ?? 0);
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    const page = Math.min(requestedPage, totalPages);
+    const offset = (page - 1) * pageSize;
+    const result = await db.prepare(
+      `SELECT o.*, u.nickname, u.phone_normalized
+       FROM orders o JOIN users u ON u.id = o.user_id
+       WHERE o.store_id = ? AND o.status <> 'PENDING_CONFIRM' AND o.submitted_at >= ?
+       ORDER BY o.submitted_at DESC LIMIT ? OFFSET ?`,
+    ).bind(STORE_ID, retentionStart, pageSize, offset).all<Row>();
+    const detailed = await Promise.all(result.results.map(async (row) => ({
+      ...(await orderDetails(db, row)),
+      phone_normalized: undefined,
+      phone_masked: maskPhone(row.phone_normalized),
+    })));
+    return success({
+      items: detailed,
+      page,
+      page_size: pageSize,
+      total,
+      total_pages: totalPages,
+      retention_days: 365,
+      retention_start: retentionStart,
+      summary: {
+        confirmed_count: Number(summary?.confirmed_count ?? 0),
+        confirmed_amount_cent: Number(summary?.confirmed_amount_cent ?? 0),
+      },
+    });
+  }
   const { page, pageSize, offset, url } = pageParams(request);
   const status = url.searchParams.get("status");
   const query = status
@@ -713,7 +764,13 @@ async function adminOrders(db: D1Database, request: Request, segments: string[])
     phone_normalized: undefined,
     phone_masked: maskPhone(row.phone_normalized),
   })));
-  return success({ items: detailed, page, page_size: pageSize });
+  const totalRow = await db.prepare(
+    status
+      ? "SELECT COUNT(*) total FROM orders WHERE store_id = ? AND status = ?"
+      : "SELECT COUNT(*) total FROM orders WHERE store_id = ?",
+  ).bind(...(status ? [STORE_ID, status] : [STORE_ID])).first<Row>();
+  const total = Number(totalRow?.total ?? 0);
+  return success({ items: detailed, page, page_size: pageSize, total, total_pages: Math.max(1, Math.ceil(total / pageSize)) });
 }
 
 async function adminMenu(db: D1Database, request: Request, segments: string[]) {
@@ -857,16 +914,22 @@ async function adminMenu(db: D1Database, request: Request, segments: string[]) {
 async function adminAnalytics(db: D1Database, request: Request) {
   const admin = await adminFromRequest(db, request);
   const { url } = pageParams(request);
-  const requested = url.searchParams.get("period") ?? "today";
-  if (!["today", "week", "month", "year"].includes(requested)) {
-    throw new ApiError(400, "INVALID_PERIOD", "统计周期不正确。");
-  }
-  if (admin.role === "OPERATOR" && requested !== "today") {
+  const today = businessDate(new Date());
+  const currentYear = Number(today.slice(0, 4));
+  const requestedYear = Number(url.searchParams.get("year") ?? currentYear);
+  const monthValue = url.searchParams.get("month");
+  const requestedMonth = monthValue ? Number(monthValue) : undefined;
+  const legacyPeriod = url.searchParams.get("period");
+  if (
+    admin.role === "OPERATOR" &&
+    (url.searchParams.has("year") || url.searchParams.has("month") || (legacyPeriod !== null && legacyPeriod !== "today"))
+  ) {
     throw new ApiError(403, "FORBIDDEN", "操作员仅可查看今日摘要。");
   }
-  const period = requested;
-  const start = periodStart(period);
-  const end = endDateExclusive();
+  const selected = admin.role === "MANAGER"
+    ? analyticsRange(requestedYear, requestedMonth)
+    : { start: today, end: addDays(today, 1), scope: "today" as const };
+  const { start, end, scope } = selected;
   const cutoff = new Date().toISOString();
   const summary = await db.prepare(
     `SELECT COALESCE(SUM(confirmed_amount_cent), 0) amount_cent, COUNT(*) order_count,
@@ -891,20 +954,30 @@ async function adminAnalytics(db: D1Database, request: Request) {
      GROUP BY oi.category_id_snapshot, oi.category_name_snapshot
      ORDER BY amount_cent DESC, name, category_id`,
   ).bind(STORE_ID, start, end, cutoff).all<Row>();
-  const bucketExpression = period === "today"
-    ? "strftime('%H:00', datetime(confirmed_at_utc, '+8 hours'))"
-    : period === "year"
-      ? "substr(business_date, 1, 7)"
-      : "business_date";
-  const trend = await db.prepare(
-    `SELECT ${bucketExpression} bucket, SUM(confirmed_amount_cent) amount_cent, COUNT(*) order_count
-     FROM consumption_records WHERE store_id = ? AND status = 'CONFIRMED'
-       AND business_date >= ? AND business_date < ? AND confirmed_at_utc <= ?
-     GROUP BY ${bucketExpression} ORDER BY ${bucketExpression}`,
-  ).bind(STORE_ID, start, end, cutoff).all<Row>();
+  const bucketExpression = scope === "year" ? "substr(business_date, 1, 7)" : "business_date";
+  const trend = scope === "today"
+    ? { results: [] as Row[] }
+    : await db.prepare(
+      `SELECT ${bucketExpression} bucket, SUM(confirmed_amount_cent) amount_cent, COUNT(*) order_count
+       FROM consumption_records WHERE store_id = ? AND status = 'CONFIRMED'
+         AND business_date >= ? AND business_date < ? AND confirmed_at_utc <= ?
+       GROUP BY ${bucketExpression} ORDER BY ${bucketExpression}`,
+    ).bind(STORE_ID, start, end, cutoff).all<Row>();
+  const yearRows = await db.prepare(
+    `SELECT DISTINCT substr(business_date, 1, 4) year
+     FROM consumption_records WHERE store_id = ?
+     ORDER BY year DESC`,
+  ).bind(STORE_ID).all<Row>();
+  const availableYears = Array.from(new Set([
+    currentYear,
+    ...yearRows.results.map((row) => Number(row.year)).filter((value) => Number.isInteger(value)),
+  ])).sort((left, right) => right - left);
   const total = Number(summary?.amount_cent ?? 0);
   return success({
-    period,
+    scope,
+    year: scope === "today" ? currentYear : requestedYear,
+    month: scope === "month" ? requestedMonth : null,
+    available_years: availableYears,
     range: { start, end_exclusive: end, cutoff_utc: cutoff },
     summary: { ...summary, average_cent: summary?.order_count ? Math.round(summary.amount_cent / summary.order_count) : null },
     top_items: topItems.results,
@@ -912,7 +985,7 @@ async function adminAnalytics(db: D1Database, request: Request) {
       ...row,
       contribution_bps: total ? Math.round(Number(row.amount_cent) * 10_000 / total) : 0,
     })),
-    trend: fillTrend(period, start, end, trend.results),
+    trend: scope === "today" ? [] : fillCalendarTrend(scope, start, end, trend.results),
   });
 }
 
