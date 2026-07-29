@@ -55,6 +55,31 @@ test("conditional state update makes the first competing transition win", () => 
   assert.equal(db.prepare("SELECT status FROM orders WHERE id='o1'").get().status, "CONFIRMED");
 });
 
+test("order item snapshots persist selections and constrain fulfillment status", () => {
+  const db = database();
+  insertOrder(db, "o1", "request-001");
+  db.prepare(`
+    INSERT INTO order_items (
+      id, order_id, item_id, sku_snapshot, name_snapshot, image_snapshot,
+      category_id_snapshot, category_code_snapshot, category_name_snapshot,
+      business_type_snapshot, attrs_snapshot_json, selection_snapshot_json,
+      fulfillment_status, unit_price_cent, quantity, subtotal_cent
+    ) VALUES (
+      'line-1','o1','lager','BR-001','本地拉格','🍺',
+      'cat-beer','BEER','啤酒','BEER','{}','{"capacity":"3L"}',
+      'AVAILABLE',8000,1,8000
+    )
+  `).run();
+  assert.equal(
+    db.prepare("SELECT json_extract(selection_snapshot_json, '$.capacity') capacity FROM order_items WHERE id='line-1'").get().capacity,
+    "3L",
+  );
+  assert.throws(
+    () => db.prepare("UPDATE order_items SET fulfillment_status='UNKNOWN' WHERE id='line-1'").run(),
+    /CHECK constraint failed/,
+  );
+});
+
 test("confirmation transaction rolls back order state when ledger insertion fails", () => {
   const db = database();
   insertOrder(db, "o1", "request-001");

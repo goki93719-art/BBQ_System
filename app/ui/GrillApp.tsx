@@ -2,6 +2,12 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, react-hooks/set-state-in-effect */
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
+import {
+  cartLineKey,
+  missingBalanceGroups,
+  priceForSelection,
+  selectionLabel,
+} from "@/lib/menu-options.mjs";
 
 type Json = Record<string, any>;
 
@@ -153,6 +159,9 @@ function CustomerApp({ user, onLogout }: { user: Json; onLogout: () => void }) {
   const [message, setMessage] = useState("");
   const [quote, setQuote] = useState<{ token: string; requestId: string } | null>(null);
   const [note, setNote] = useState("");
+  const [selectedItem, setSelectedItem] = useState<Json | null>(null);
+  const [draftQuantity, setDraftQuantity] = useState(1);
+  const [draftSelection, setDraftSelection] = useState<Json>({});
 
   const loadMenu = useCallback(async (query = "") => {
     const data = await api(`/api/menu${query ? `?keyword=${encodeURIComponent(query)}` : ""}`);
@@ -174,29 +183,80 @@ function CustomerApp({ user, onLogout }: { user: Json; onLogout: () => void }) {
 
   useEffect(() => { void loadMenu(); void loadOrders(); }, [loadMenu, loadOrders]);
   useEffect(() => { if (tab === "consumption") void loadConsumption(); }, [tab, loadConsumption]);
+  useEffect(() => {
+    const refresh = () => { if (document.visibilityState === "visible") void loadMenu(searchedKeyword); };
+    const timer = window.setInterval(refresh, 8000);
+    window.addEventListener("focus", refresh);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", refresh);
+    };
+  }, [loadMenu, searchedKeyword]);
+  useEffect(() => {
+    if (searchedKeyword) return;
+    const latest = new Map<string, Json>(
+      menu.categories.flatMap((category: Json) => category.items).map((item: Json) => [String(item.id), item]),
+    );
+    setCart((current) => Object.fromEntries(Object.entries(current).map(([key, line]) => {
+      const item = latest.get(line.id);
+      return [key, {
+        ...line,
+        invalid: !item?.sellable,
+        invalidReason: item ? item.sale_label : "已下架",
+      }];
+    })));
+  }, [menu, searchedKeyword]);
 
   const cartLines = Object.values(cart);
   const cartCount = cartLines.reduce((sum, line) => sum + line.quantity, 0);
   const invalidCartLines = cartLines.filter((line) => line.invalid);
   const cartTotal = cartLines.reduce((sum, line) => sum + (line.invalid ? 0 : line.price_cent * line.quantity), 0);
   const activeCategory = menu.categories.find((category: Json) => category.id === categoryId) ?? menu.categories[0];
+  const missingGroups = missingBalanceGroups(cartLines);
+  const selectedUnitPrice = selectedItem
+    ? priceForSelection(selectedItem.price_cent, selectedItem.business_type, draftSelection)
+    : 0;
 
-  function add(item: Json) {
+  function openItem(item: Json) {
     if (!item.sellable) return;
+    const selection = Object.fromEntries(
+      (item.option_groups ?? []).map((group: Json) => [group.key, group.values[0]?.value]),
+    );
+    setSelectedItem(item);
+    setDraftSelection(selection);
+    setDraftQuantity(1);
+  }
+
+  function addSelectedItem() {
+    if (!selectedItem?.sellable) return;
+    const key = cartLineKey(selectedItem.id, draftSelection);
     setCart((current) => {
-      const quantity = Math.min(99, (current[item.id]?.quantity ?? 0) + 1);
-      return { ...current, [item.id]: { ...item, quantity } };
+      const quantity = Math.min(99, (current[key]?.quantity ?? 0) + draftQuantity);
+      return {
+        ...current,
+        [key]: {
+          ...selectedItem,
+          lineKey: key,
+          selection: draftSelection,
+          selection_label: selectionLabel(draftSelection),
+          price_cent: selectedUnitPrice,
+          quantity,
+          invalid: false,
+        },
+      };
     });
-    setMessage(`${item.name} 已加入购物车`);
+    setMessage(`${selectedItem.name} × ${draftQuantity} 已加入购物车`);
+    setSelectedItem(null);
+    setQuote(null);
     window.setTimeout(() => setMessage(""), 1500);
   }
 
-  function changeQuantity(id: string, delta: number) {
+  function changeQuantity(lineKey: string, delta: number) {
     setCart((current) => {
       const next = { ...current };
-      const quantity = (next[id]?.quantity ?? 0) + delta;
-      if (quantity <= 0) delete next[id];
-      else next[id] = { ...next[id], quantity: Math.min(99, quantity) };
+      const quantity = (next[lineKey]?.quantity ?? 0) + delta;
+      if (quantity <= 0) delete next[lineKey];
+      else next[lineKey] = { ...next[lineKey], quantity: Math.min(99, quantity) };
       return next;
     });
     setQuote(null);
@@ -214,7 +274,12 @@ function CustomerApp({ user, onLogout }: { user: Json; onLogout: () => void }) {
         method: "POST",
         body: JSON.stringify({
           clientRequestId: requestId,
-          items: cartLines.map((line) => ({ itemId: line.id, quantity: line.quantity, unitPriceCent: line.price_cent })),
+          items: cartLines.map((line) => ({
+            itemId: line.id,
+            quantity: line.quantity,
+            unitPriceCent: line.price_cent,
+            selection: line.selection,
+          })),
           note,
           quoteToken: confirmQuote ? quote?.token : undefined,
         }),
@@ -230,13 +295,16 @@ function CustomerApp({ user, onLogout }: { user: Json; onLogout: () => void }) {
       if (apiError.code === "CART_CHANGED" && apiError.details) {
         const next: Record<string, Json> = {};
         for (const line of apiError.details.items ?? []) {
-          const original = cart[line.item_id];
+          const key = line.line_key ?? cartLineKey(line.item_id, line.selection);
+          const original = cart[key];
           if (original) {
-            next[line.item_id] = {
+            next[key] = {
               ...original,
               name: line.name ?? original.name,
               price_cent: line.unit_price_cent || original.price_cent,
               quantity: line.quantity,
+              selection: line.selection ?? original.selection,
+              selection_label: line.selection_label ?? original.selection_label,
               invalid: !line.available,
               invalidReason: line.reason,
             };
@@ -247,6 +315,47 @@ function CustomerApp({ user, onLogout }: { user: Json; onLogout: () => void }) {
       }
       setMessage(apiError.message);
     }
+  }
+
+  async function repeatLastOrder(order: Json) {
+    const fullMenu = await api("/api/menu");
+    setMenu(fullMenu);
+    setKeyword("");
+    setSearchedKeyword("");
+    const currentMenu = new Map<string, Json>(
+      fullMenu.categories.flatMap((category: Json) => category.items).map((item: Json) => [String(item.id), item]),
+    );
+    const next: Record<string, Json> = {};
+    let skipped = 0;
+    for (const orderedItem of order.items ?? []) {
+      const item = currentMenu.get(orderedItem.item_id);
+      if (!item?.sellable) {
+        skipped += 1;
+        continue;
+      }
+      const selection = orderedItem.selection ?? {};
+      const key = cartLineKey(item.id, selection);
+      const unitPrice = priceForSelection(item.price_cent, item.business_type, selection);
+      next[key] = {
+        ...item,
+        lineKey: key,
+        selection,
+        selection_label: selectionLabel(selection),
+        price_cent: unitPrice,
+        quantity: Math.min(99, (next[key]?.quantity ?? 0) + Number(orderedItem.quantity)),
+        invalid: false,
+      };
+    }
+    if (!Object.keys(next).length) {
+      setMessage("上次订单的商品当前都不可售，先看看今日菜单吧。");
+      setTab("menu");
+      return;
+    }
+    setCart(next);
+    setQuote(null);
+    setTab("menu");
+    setCartOpen(true);
+    setMessage(skipped ? `已恢复上次订单，${skipped} 个不可售商品已跳过。` : "上次订单已放入购物车。");
   }
 
   function searchMenu(event: FormEvent) {
@@ -306,7 +415,8 @@ function CustomerApp({ user, onLogout }: { user: Json; onLogout: () => void }) {
                   <div className="food-copy">
                     <div><h3>{item.name}</h3><p>{item.description}</p></div>
                     <div className="attr-row">{Object.entries(item.attrs ?? {}).slice(0, 2).map(([key, value]) => <span key={key}>{String(value)}</span>)}</div>
-                    <footer><strong>{money(item.price_cent)}</strong><button disabled={!item.sellable} onClick={() => add(item)} aria-label={`加入 ${item.name}`}>{item.sellable ? "+" : item.sale_label}</button></footer>
+                    <div className="monthly-sales">月售 <b>{item.monthly_sold ?? 0}</b></div>
+                    <footer><strong>{money(item.price_cent)}{item.business_type === "BEER" && <small> 起</small>}</strong><button disabled={!item.sellable} onClick={() => openItem(item)} aria-label={`选择 ${item.name}`}>{item.sellable ? "选" : item.sale_label}</button></footer>
                   </div>
                 </article>
               ))}
@@ -318,13 +428,19 @@ function CustomerApp({ user, onLogout }: { user: Json; onLogout: () => void }) {
       {tab === "orders" && (
         <main className="content-page">
           <div className="page-title"><p className="eyebrow">MY ORDERS</p><h1>我的订单</h1><p>每一单都有迹可循，门店确认后才会记入消费。</p></div>
+          {orders[0] && (
+            <section className="last-order">
+              <div><span>上次点单</span><strong>{orders[0].order_no}</strong><small>{orders[0].items?.length ?? 0} 种 · {money(orders[0].total_cent)}</small></div>
+              <button className="primary-button" onClick={() => repeatLastOrder(orders[0])}>一键重订</button>
+            </section>
+          )}
           <div className="order-list">
             {orders.length === 0 && <div className="empty-state">还没有订单，去菜单挑点喜欢的吧。</div>}
             {orders.map((order) => (
               <article className="order-card" key={order.id}>
                 <header><div><span className={`status status-${order.status}`}>{statusText[order.status]}</span><strong>{order.order_no}</strong></div><time>{dateTime(order.submitted_at)}</time></header>
-                <div className="order-items">{order.items.map((item: Json) => <p key={item.id}><span>{item.name_snapshot} × {item.quantity}</span><b>{money(item.subtotal_cent)}</b></p>)}</div>
-                <footer><span>{order.note || "无备注"}</span><div><strong>{money(order.total_cent)}</strong>{order.status === "PENDING_CONFIRM" && <button className="outline-danger" onClick={() => cancel(order.id)}>撤回订单</button>}</div></footer>
+                <div className="order-items">{order.items.map((item: Json) => <p className={item.fulfillment_status === "SOLD_OUT" ? "sold-out-line" : ""} key={item.id}><span>{item.name_snapshot}{item.selection_label ? ` · ${item.selection_label}` : ""} × {item.quantity}{item.fulfillment_status === "SOLD_OUT" && <em>售罄 · 已移除金额</em>}</span><b>{money(item.subtotal_cent)}</b></p>)}</div>
+                <footer><span>{order.note || "无备注"}{order.removed_amount_cent > 0 && <small>已移除售罄商品 {money(order.removed_amount_cent)}</small>}</span><div><strong>{money(order.total_cent)}</strong>{order.status === "PENDING_CONFIRM" && <button className="outline-danger" onClick={() => cancel(order.id)}>撤回订单</button>}</div></footer>
               </article>
             ))}
           </div>
@@ -351,12 +467,41 @@ function CustomerApp({ user, onLogout }: { user: Json; onLogout: () => void }) {
             <header><div><p className="eyebrow">YOUR CART</p><h2>购物车</h2></div><button onClick={() => setCartOpen(false)}>×</button></header>
             <div className="cart-lines">
               {!cartLines.length && <div className="empty-state">还没选好吃的，去菜单逛逛。</div>}
-              {cartLines.map((line) => <div className={`cart-line ${line.invalid ? "invalid" : ""}`} key={line.id}><span className="cart-icon">{line.image_url}</span><div><strong>{line.name}</strong><small>{line.invalid ? `失效：${line.invalidReason}` : money(line.price_cent)}</small>{line.invalid && <button className="remove-invalid" onClick={() => changeQuantity(line.id, -line.quantity)}>移除失效商品</button>}</div><div className="stepper"><button disabled={line.invalid} onClick={() => changeQuantity(line.id, -1)}>−</button><b>{line.quantity}</b><button disabled={line.invalid} onClick={() => changeQuantity(line.id, 1)}>+</button></div></div>)}
+              {cartLines.map((line) => <div className={`cart-line ${line.invalid ? "invalid" : ""}`} key={line.lineKey}><span className="cart-icon">{line.image_url}</span><div><strong>{line.name}</strong>{line.selection_label && <em>{line.selection_label}</em>}<small>{line.invalid ? `失效：${line.invalidReason}` : money(line.price_cent)}</small>{line.invalid && <button className="remove-invalid" onClick={() => changeQuantity(line.lineKey, -line.quantity)}>移除失效商品</button>}</div><div className="stepper"><button disabled={line.invalid} onClick={() => changeQuantity(line.lineKey, -1)}>−</button><b>{line.quantity}</b><button disabled={line.invalid} onClick={() => changeQuantity(line.lineKey, 1)}>+</button></div></div>)}
             </div>
             <label className="note-field">订单备注<textarea value={note} onChange={(event) => setNote(event.target.value)} maxLength={200} placeholder="例如：少辣、不要香菜" /></label>
+            {!!cartLines.length && (
+              <div className={`balance-tip ${missingGroups.length ? "" : "complete"}`}>
+                <span>{missingGroups.length ? "搭配小提示" : "搭配很丰富"}</span>
+                <p>{missingGroups.length ? `还可以加点${missingGroups.join("、")}，吃得更舒服。仅供参考，不影响下单。` : "荤素、主食和饮品都照顾到了，可以放心提交。"}</p>
+              </div>
+            )}
             {quote && <div className="quote-alert">菜单有变化，已为你更新购物车。请再次确认金额。</div>}
             <footer><div><span>合计（失效商品不计）</span><strong>{money(cartTotal)}</strong></div><button className="primary-button wide" disabled={!cartLines.length || invalidCartLines.length > 0} onClick={() => submitOrder(Boolean(quote))}>{invalidCartLines.length ? "请先移除失效商品" : quote ? "确认变更并提交" : "提交订单 · 门店确认"}</button></footer>
           </aside>
+        </div>
+      )}
+      {selectedItem && (
+        <div className="option-backdrop" onClick={() => setSelectedItem(null)}>
+          <section className="option-dialog" role="dialog" aria-modal="true" aria-label={`选择 ${selectedItem.name}`} onClick={(event) => event.stopPropagation()}>
+            <header><div className="option-food">{selectedItem.image_url || "🔥"}</div><div><p className="eyebrow">CUSTOMIZE</p><h2>{selectedItem.name}</h2><p>{selectedItem.description}</p></div><button aria-label="关闭" onClick={() => setSelectedItem(null)}>×</button></header>
+            {(selectedItem.option_groups ?? []).map((group: Json) => (
+              <fieldset key={group.key}>
+                <legend>{group.label}</legend>
+                <div className={`option-values ${group.key === "capacity" ? "capacity-values" : ""}`}>
+                  {group.values.map((option: Json) => (
+                    <button key={option.value} className={draftSelection[group.key] === option.value ? "active" : ""} onClick={() => setDraftSelection((current) => ({ ...current, [group.key]: option.value }))}>
+                      <strong>{option.label}</strong>
+                      {option.price_cent != null && <small>{money(option.price_cent)} · 每500ML {money(option.unit_price_per_500ml_cent)}</small>}
+                    </button>
+                  ))}
+                </div>
+              </fieldset>
+            ))}
+            {!selectedItem.option_groups?.length && <div className="simple-choice">这道菜无需选择口味，直接调整份数即可。</div>}
+            <div className="option-quantity"><span>数量</span><div className="stepper large"><button onClick={() => setDraftQuantity((value) => Math.max(1, value - 1))}>−</button><b>{draftQuantity}</b><button onClick={() => setDraftQuantity((value) => Math.min(99, value + 1))}>+</button></div></div>
+            <footer><div><span>小计</span><strong>{money(selectedUnitPrice * draftQuantity)}</strong></div><button className="primary-button" onClick={addSelectedItem}>加入购物车</button></footer>
+          </section>
         </div>
       )}
       <Toast message={message} tone={quote ? "warm" : "dark"} />
@@ -461,8 +606,23 @@ function AdminApp({ admin, onLogout }: { admin: Json; onLogout: () => void }) {
   }
   async function toggleItem(item: Json, field: "status" | "soldOut") {
     const body = field === "status" ? { status: item.status === "ACTIVE" ? "INACTIVE" : "ACTIVE", version: item.version } : { soldOut: !item.sold_out, version: item.version };
-    await api(`/api/admin/items/${item.id}`, { method: "PATCH", body: JSON.stringify(body) });
-    await loadMenu();
+    try {
+      const data = await api(`/api/admin/items/${item.id}`, { method: "PATCH", body: JSON.stringify(body) });
+      const impact = data.sold_out_impact;
+      setMessage(
+        field === "soldOut" && body.soldOut
+          ? impact?.order_count
+            ? `已售罄并更新 ${impact.order_count} 个待确认订单，移除金额 ${money(impact.amount_cent)}`
+            : "已设为售罄，顾客菜单即时生效"
+          : field === "soldOut"
+            ? "已恢复供应"
+            : "商品上下架状态已更新",
+      );
+      await Promise.all([loadMenu(), loadOrders()]);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "更新失败");
+      await Promise.all([loadMenu(), loadOrders()]);
+    }
   }
   async function addCategory() {
     const name = window.prompt("品类名称");
@@ -502,7 +662,7 @@ function AdminApp({ admin, onLogout }: { admin: Json; onLogout: () => void }) {
           <section className="admin-panel"><header><h2>待确认订单</h2><span>{pending.length} 单等待处理</span></header>
             <div className="admin-order-grid">
               {pending.length === 0 && <div className="empty-state">所有订单都已处理，干得漂亮。</div>}
-              {pending.map((order) => <article className="admin-order" key={order.id}><header><div><strong>{order.order_no}</strong><small>{order.nickname} · {order.phone_masked}</small></div><time>{dateTime(order.submitted_at)}</time></header><div>{order.items.map((item: Json) => <p key={item.id}><span>{item.name_snapshot} × {item.quantity}</span><b>{money(item.subtotal_cent)}</b></p>)}</div>{order.note && <blockquote>备注：{order.note}</blockquote>}<footer><strong>{money(order.total_cent)}</strong><span><button className="outline-danger" onClick={() => process(order, "reject")}>拒绝</button><button className="primary-button" onClick={() => process(order, "confirm")}>确认接单</button></span></footer></article>)}
+              {pending.map((order) => <article className="admin-order" key={order.id}><header><div><strong>{order.order_no}</strong><small>{order.nickname} · {order.phone_masked}</small></div><time>{dateTime(order.submitted_at)}</time></header><div>{order.items.map((item: Json) => <p className={item.fulfillment_status === "SOLD_OUT" ? "sold-out-line" : ""} key={item.id}><span>{item.name_snapshot}{item.selection_label ? ` · ${item.selection_label}` : ""} × {item.quantity}{item.fulfillment_status === "SOLD_OUT" && <em>售罄 · 已移除</em>}</span><b>{money(item.subtotal_cent)}</b></p>)}</div>{order.note && <blockquote>备注：{order.note}</blockquote>}{order.removed_amount_cent > 0 && <div className="sold-out-summary">售罄商品已移除 {money(order.removed_amount_cent)}</div>}<footer><strong>{money(order.total_cent)}</strong><span><button className="outline-danger" onClick={() => process(order, "reject")}>拒绝</button><button className="primary-button" disabled={order.total_cent <= 0} onClick={() => process(order, "confirm")}>{order.total_cent > 0 ? "确认接单" : "请拒绝"}</button></span></footer></article>)}
             </div>
           </section>
           <section className="admin-panel compact-table"><header><h2>近期订单</h2></header>{orders.filter((order) => order.status !== "PENDING_CONFIRM").slice(0, 12).map((order) => <div className="table-row" key={order.id}><span><b>{order.order_no}</b><small>{order.nickname} · {dateTime(order.submitted_at)}</small></span><span className={`status status-${order.status}`}>{statusText[order.status]}</span><strong>{money(order.total_cent)}</strong>{manager && order.status === "CONFIRMED" ? <button className="text-danger" onClick={() => process(order, "void")}>作废</button> : <i />}</div>)}</section>

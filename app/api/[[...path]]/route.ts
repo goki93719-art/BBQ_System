@@ -10,6 +10,13 @@ import {
   periodStart,
   validPassword,
 } from "@/lib/rules.mjs";
+import {
+  cartLineKey,
+  itemOptionGroups,
+  normalizeItemSelection,
+  priceForSelection,
+  selectionLabel,
+} from "@/lib/menu-options.mjs";
 
 type Row = Record<string, any>;
 type RouteContext = { params: Promise<{ path?: string[] }> };
@@ -152,14 +159,25 @@ async function orderDetails(db: D1Database, order: Row) {
     db.prepare("SELECT * FROM order_items WHERE order_id = ? ORDER BY id").bind(order.id).all<Row>(),
     db.prepare("SELECT * FROM order_status_history WHERE order_id = ? ORDER BY created_at").bind(order.id).all<Row>(),
   ]);
-  return { ...order, items: items.results, history: history.results };
+  const detailedItems: Row[] = items.results.map((item) => {
+    const selection = JSON.parse(item.selection_snapshot_json || "{}");
+    return { ...item, selection, selection_label: selectionLabel(selection) };
+  });
+  return {
+    ...order,
+    items: detailedItems,
+    history: history.results,
+    removed_amount_cent: detailedItems
+      .filter((item) => item.fulfillment_status === "SOLD_OUT")
+      .reduce((sum, item) => sum + Number(item.subtotal_cent), 0),
+  };
 }
 
 async function currentCart(db: D1Database, requested: Row[]) {
   if (!Array.isArray(requested) || requested.length === 0 || requested.length > 50) {
     throw new ApiError(400, "INVALID_CART", "购物车需包含 1–50 个商品。");
   }
-  const merged = new Map<string, { itemId: string; quantity: number; unitPriceCent: number }>();
+  const rawRequests: Array<{ itemId: string; quantity: number; unitPriceCent: number; selection: Row }> = [];
   for (const raw of requested) {
     const itemId = String(raw.itemId ?? "");
     const quantity = Number(raw.quantity);
@@ -167,12 +185,12 @@ async function currentCart(db: D1Database, requested: Row[]) {
     if (!itemId || !Number.isInteger(quantity) || quantity < 1 || quantity > 99 || !Number.isInteger(unitPriceCent)) {
       throw new ApiError(400, "INVALID_CART_ITEM", "商品、数量或价格格式不正确。");
     }
-    const previous = merged.get(itemId);
-    const combined = (previous?.quantity ?? 0) + quantity;
-    if (combined > 99) throw new ApiError(422, "QUANTITY_LIMIT", "单项商品最多购买 99 件。");
-    merged.set(itemId, { itemId, quantity: combined, unitPriceCent });
+    const selection = raw.selection && typeof raw.selection === "object" && !Array.isArray(raw.selection)
+      ? raw.selection
+      : {};
+    rawRequests.push({ itemId, quantity, unitPriceCent, selection });
   }
-  const ids = [...merged.keys()];
+  const ids = [...new Set(rawRequests.map((requestItem) => requestItem.itemId))];
   const placeholders = ids.map(() => "?").join(",");
   const rows = await db.prepare(
     `SELECT i.*, c.name category_name, c.code category_code, c.status category_status,
@@ -181,8 +199,39 @@ async function currentCart(db: D1Database, requested: Row[]) {
      WHERE i.store_id = ? AND i.id IN (${placeholders})`,
   ).bind(STORE_ID, ...ids).all<Row>();
   const byId = new Map(rows.results.map((row) => [row.id, row]));
-  return [...merged.values()].map((requestItem) => {
+  const merged = new Map<string, {
+    itemId: string;
+    quantity: number;
+    requestedPriceCent: number;
+    selection: Row;
+    item: Row | undefined;
+  }>();
+  for (const requestItem of rawRequests) {
     const item = byId.get(requestItem.itemId);
+    const selection = item
+      ? normalizeItemSelection(item.category_code, item.business_type, requestItem.selection)
+      : {};
+    if (item && !selection) {
+      throw new ApiError(400, "INVALID_ITEM_SELECTION", "商品口味或容量选择不正确。");
+    }
+    const normalizedSelection = selection ?? {};
+    const key = cartLineKey(requestItem.itemId, normalizedSelection);
+    const previous = merged.get(key);
+    if (previous && previous.requestedPriceCent !== requestItem.unitPriceCent) {
+      throw new ApiError(400, "INVALID_CART_ITEM", "同规格商品价格不一致。");
+    }
+    const combined = (previous?.quantity ?? 0) + requestItem.quantity;
+    if (combined > 99) throw new ApiError(422, "QUANTITY_LIMIT", "同规格商品最多购买 99 件。");
+    merged.set(key, {
+      itemId: requestItem.itemId,
+      quantity: combined,
+      requestedPriceCent: requestItem.unitPriceCent,
+      selection: normalizedSelection,
+      item,
+    });
+  }
+  return [...merged.entries()].map(([lineKey, requestItem]) => {
+    const item = requestItem.item;
     let reason = "";
     if (!item || item.status !== "ACTIVE" || item.category_status !== "ENABLED") reason = "已下架";
     else if (item.sold_out) reason = "已售罄";
@@ -190,11 +239,16 @@ async function currentCart(db: D1Database, requested: Row[]) {
       !inSalePeriods(JSON.parse(item.sale_periods_json || "[]")) ||
       !inSalePeriods(JSON.parse(item.category_sale_periods || "[]"))
     ) reason = "当前不在售卖时段";
+    const unitPriceCent = item
+      ? priceForSelection(item.price_cent, item.business_type, requestItem.selection)
+      : 0;
     return {
+      lineKey,
       itemId: requestItem.itemId,
       quantity: requestItem.quantity,
-      requestedPriceCent: requestItem.unitPriceCent,
-      unitPriceCent: item?.price_cent ?? 0,
+      selection: requestItem.selection,
+      requestedPriceCent: requestItem.requestedPriceCent,
+      unitPriceCent,
       available: !reason,
       reason,
       item,
@@ -300,15 +354,28 @@ async function handleAuth(db: D1Database, request: Request, segments: string[]) 
 
 async function handleMenu(db: D1Database, request: Request) {
   const keyword = (new URL(request.url).searchParams.get("keyword") ?? "").trim().toLocaleLowerCase();
+  const monthStart = periodStart("month");
+  const monthEnd = endDateExclusive();
   const categoryRows = await db.prepare(
     "SELECT * FROM categories WHERE store_id = ? AND status = 'ENABLED' ORDER BY sort_order, name",
   ).bind(STORE_ID).all<Row>();
-  const itemRows = await db.prepare(
-    `SELECT i.*, c.status category_status, c.sale_periods_json category_sale_periods
+  const [itemRows, monthlyRows] = await Promise.all([
+    db.prepare(
+      `SELECT i.*, c.status category_status, c.code category_code, c.name category_name,
+              c.sale_periods_json category_sale_periods
      FROM items i JOIN categories c ON c.id = i.category_id
      WHERE i.store_id = ? AND i.status = 'ACTIVE' AND c.status = 'ENABLED'
-     ORDER BY i.sort_order, i.name`,
-  ).bind(STORE_ID).all<Row>();
+     ORDER BY i.sold_out, i.sort_order, i.name`,
+    ).bind(STORE_ID).all<Row>(),
+    db.prepare(
+      `SELECT oi.item_id, COALESCE(SUM(oi.quantity), 0) quantity
+       FROM order_items oi JOIN consumption_records c ON c.order_id = oi.order_id
+       WHERE c.store_id = ? AND c.status = 'CONFIRMED' AND oi.fulfillment_status = 'AVAILABLE'
+         AND c.business_date >= ? AND c.business_date < ?
+       GROUP BY oi.item_id`,
+    ).bind(STORE_ID, monthStart, monthEnd).all<Row>(),
+  ]);
+  const monthlySales = new Map(monthlyRows.results.map((row) => [row.item_id, Number(row.quantity)]));
   const visibleItems = keyword
     ? itemRows.results.filter((item) =>
       `${item.name} ${item.description} ${item.attrs_json}`.toLocaleLowerCase().includes(keyword))
@@ -320,14 +387,19 @@ async function handleMenu(db: D1Database, request: Request) {
         inSalePeriods(JSON.parse(item.category_sale_periods || "[]"));
       return {
         ...item,
-        attrs: JSON.parse(item.attrs_json || "{}"),
+        attrs: {
+          ...JSON.parse(item.attrs_json || "{}"),
+          ...(item.business_type === "BEER" ? { 容量: "500ML 起" } : {}),
+        },
+        option_groups: itemOptionGroups(item.category_code, item.business_type, item.price_cent),
+        monthly_sold: monthlySales.get(item.id) ?? 0,
         sellable: !item.sold_out && inPeriod,
         sale_label: item.sold_out ? "已售罄" : !inPeriod ? "非售卖时段" : "",
       };
     }),
   })).filter((category) => !keyword || category.items.length > 0);
   const store = await db.prepare("SELECT * FROM stores WHERE id = ?").bind(STORE_ID).first<Row>();
-  return success({ store, categories, keyword });
+  return success({ store, categories, keyword, sales_month: monthStart.slice(0, 7) });
 }
 
 async function createOrder(db: D1Database, request: Request) {
@@ -352,6 +424,7 @@ async function createOrder(db: D1Database, request: Request) {
     itemId: line.itemId,
     quantity: line.quantity,
     unitPriceCent: line.unitPriceCent,
+    selection: line.selection,
   })));
   const cartHash = await sha256(latestCanonical);
   const pendingQuote = await db.prepare(
@@ -373,9 +446,12 @@ async function createOrder(db: D1Database, request: Request) {
     throw new ApiError(409, "CART_CHANGED", "购物车内容已变化，请确认后重新提交。", {
       quote_token: quoteToken,
       items: cart.map((line) => ({
+        line_key: line.lineKey,
         item_id: line.itemId,
         quantity: line.quantity,
         unit_price_cent: line.unitPriceCent,
+        selection: line.selection,
+        selection_label: selectionLabel(line.selection),
         available: line.available,
         reason: line.reason,
         name: line.item?.name ?? "已失效商品",
@@ -402,11 +478,15 @@ async function createOrder(db: D1Database, request: Request) {
   for (const line of cart) {
     const item = line.item!;
     statements.push(db.prepare(
-      `INSERT INTO order_items VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO order_items
+       (id, order_id, item_id, sku_snapshot, name_snapshot, image_snapshot, category_id_snapshot,
+        category_code_snapshot, category_name_snapshot, business_type_snapshot, attrs_snapshot_json,
+        selection_snapshot_json, fulfillment_status, unavailable_reason, unit_price_cent, quantity, subtotal_cent)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'AVAILABLE', NULL, ?, ?, ?)`,
     ).bind(
       crypto.randomUUID(), orderId, item.id, item.sku, item.name, item.image_url, item.category_id,
-      item.category_code, item.category_name, item.business_type, item.attrs_json, item.price_cent,
-      line.quantity, item.price_cent * line.quantity,
+      item.category_code, item.category_name, item.business_type, item.attrs_json, JSON.stringify(line.selection),
+      line.unitPriceCent, line.quantity, line.unitPriceCent * line.quantity,
     ));
   }
   if (pendingQuote) statements.push(db.prepare("UPDATE quote_tokens SET consumed_at = ? WHERE id = ?").bind(now, pendingQuote.id));
@@ -532,6 +612,9 @@ async function adminOrders(db: D1Database, request: Request, segments: string[])
         return success({ order, consumption_record: record, idempotent_replay: true });
       }
       if (order.status !== "PENDING_CONFIRM") throw new ApiError(409, "ORDER_ALREADY_PROCESSED", "订单已处理。", { final_status: order.status, processed_at: order.processed_at });
+      if (Number(order.total_cent) <= 0) {
+        throw new ApiError(409, "ORDER_HAS_NO_AVAILABLE_ITEMS", "订单商品均已售罄，请拒绝该订单。");
+      }
       const recordId = crypto.randomUUID();
       await db.batch([
         db.prepare("UPDATE orders SET status = 'CONFIRMED', processed_at = ?, confirmed_by = ? WHERE id = ? AND status = 'PENDING_CONFIRM'").bind(now, admin.id, order.id),
@@ -642,7 +725,7 @@ async function adminMenu(db: D1Database, request: Request, segments: string[]) {
     const query = resource === "categories"
       ? "SELECT * FROM categories WHERE store_id = ? ORDER BY sort_order, name LIMIT ? OFFSET ?"
       : `SELECT i.*, c.name category_name FROM items i JOIN categories c ON c.id = i.category_id
-         WHERE i.store_id = ? ORDER BY c.sort_order, i.sort_order, i.name LIMIT ? OFFSET ?`;
+         WHERE i.store_id = ? ORDER BY i.sold_out, c.sort_order, i.sort_order, i.name LIMIT ? OFFSET ?`;
     const rows = await db.prepare(query).bind(STORE_ID, pageSize, offset).all<Row>();
     const totalRow = await db.prepare(
       resource === "categories"
@@ -720,16 +803,53 @@ async function adminMenu(db: D1Database, request: Request, segments: string[]) {
     const soldOut = body.soldOut === undefined ? before.sold_out : body.soldOut ? 1 : 0;
     const version = Number(body.version ?? before.version);
     if (!name || !Number.isInteger(priceCent) || priceCent <= 0) throw new ApiError(400, "INVALID_ITEM", "商品名称或价格不正确。");
-    await db.batch([
+    const soldOutTransition = Number(before.sold_out) === 0 && soldOut === 1;
+    const impact = soldOutTransition
+      ? await db.prepare(
+        `SELECT COUNT(DISTINCT oi.order_id) order_count, COALESCE(SUM(oi.subtotal_cent), 0) amount_cent
+         FROM order_items oi JOIN orders o ON o.id = oi.order_id
+         WHERE oi.item_id = ? AND oi.fulfillment_status = 'AVAILABLE' AND o.status = 'PENDING_CONFIRM'`,
+      ).bind(id).first<Row>()
+      : { order_count: 0, amount_cent: 0 };
+    const statements = [
       db.prepare("UPDATE items SET name = ?, price_cent = ?, status = ?, sold_out = ?, version = version + 1, updated_at = ? WHERE id = ? AND version = ?").bind(name, priceCent, status, soldOut, now, id, version),
       db.prepare("INSERT OR IGNORE INTO audit_logs SELECT ?, store_id, 'ADMIN', ?, 'ITEM_UPDATE', 'ITEM', id, ?, ?, '', ?, ? FROM items WHERE id = ? AND version = ?").bind(
         crypto.randomUUID(), admin.id, JSON.stringify({ name: before.name, price_cent: before.price_cent, status: before.status, sold_out: before.sold_out }),
         JSON.stringify({ name, price_cent: priceCent, status, sold_out: soldOut }), `item:${id}:v${version + 1}`, now, id, version + 1,
       ),
-    ]);
+    ];
+    if (soldOutTransition) {
+      statements.push(
+        db.prepare(
+          `UPDATE order_items SET fulfillment_status = 'SOLD_OUT', unavailable_reason = '商品已售罄'
+           WHERE item_id = ? AND fulfillment_status = 'AVAILABLE'
+             AND EXISTS (SELECT 1 FROM orders o WHERE o.id = order_items.order_id AND o.status = 'PENDING_CONFIRM')
+             AND EXISTS (SELECT 1 FROM items i WHERE i.id = ? AND i.version = ? AND i.sold_out = 1)`,
+        ).bind(id, id, version + 1),
+        db.prepare(
+          `UPDATE orders SET total_cent = (
+             SELECT COALESCE(SUM(CASE WHEN oi.fulfillment_status = 'AVAILABLE' THEN oi.subtotal_cent ELSE 0 END), 0)
+             FROM order_items oi WHERE oi.order_id = orders.id
+           )
+           WHERE status = 'PENDING_CONFIRM'
+             AND EXISTS (
+               SELECT 1 FROM order_items oi
+               WHERE oi.order_id = orders.id AND oi.item_id = ? AND oi.fulfillment_status = 'SOLD_OUT'
+             )
+             AND EXISTS (SELECT 1 FROM items i WHERE i.id = ? AND i.version = ? AND i.sold_out = 1)`,
+        ).bind(id, id, version + 1),
+      );
+    }
+    await db.batch(statements);
     const updated = await db.prepare("SELECT * FROM items WHERE id = ?").bind(id).first<Row>();
     if (updated?.version !== version + 1) throw new ApiError(409, "VERSION_CONFLICT", "商品已被其他人修改，请刷新。");
-    return success({ item: updated });
+    return success({
+      item: updated,
+      sold_out_impact: {
+        order_count: Number(impact?.order_count ?? 0),
+        amount_cent: Number(impact?.amount_cent ?? 0),
+      },
+    });
   }
   throw new ApiError(404, "NOT_FOUND", "接口不存在。");
 }
@@ -758,7 +878,7 @@ async function adminAnalytics(db: D1Database, request: Request) {
     `SELECT oi.name_snapshot name, oi.item_id item_id, SUM(oi.quantity) quantity,
             SUM(oi.subtotal_cent) amount_cent
      FROM order_items oi JOIN consumption_records c ON c.order_id = oi.order_id
-     WHERE c.store_id = ? AND c.status = 'CONFIRMED'
+     WHERE c.store_id = ? AND c.status = 'CONFIRMED' AND oi.fulfillment_status = 'AVAILABLE'
        AND c.business_date >= ? AND c.business_date < ? AND c.confirmed_at_utc <= ?
      GROUP BY oi.name_snapshot, oi.item_id ORDER BY amount_cent DESC, name, item_id LIMIT 8`,
   ).bind(STORE_ID, start, end, cutoff).all<Row>();
@@ -766,7 +886,7 @@ async function adminAnalytics(db: D1Database, request: Request) {
     `SELECT oi.category_id_snapshot category_id, oi.category_name_snapshot name,
             SUM(oi.subtotal_cent) amount_cent
      FROM order_items oi JOIN consumption_records c ON c.order_id = oi.order_id
-     WHERE c.store_id = ? AND c.status = 'CONFIRMED'
+     WHERE c.store_id = ? AND c.status = 'CONFIRMED' AND oi.fulfillment_status = 'AVAILABLE'
        AND c.business_date >= ? AND c.business_date < ? AND c.confirmed_at_utc <= ?
      GROUP BY oi.category_id_snapshot, oi.category_name_snapshot
      ORDER BY amount_cent DESC, name, category_id`,

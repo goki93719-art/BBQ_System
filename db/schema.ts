@@ -157,11 +157,16 @@ export const orderItems = sqliteTable("order_items", {
   categoryNameSnapshot: text("category_name_snapshot").notNull(),
   businessTypeSnapshot: text("business_type_snapshot").notNull(),
   attrsSnapshotJson: text("attrs_snapshot_json").notNull(),
+  selectionSnapshotJson: text("selection_snapshot_json").notNull().default("{}"),
+  fulfillmentStatus: text("fulfillment_status").notNull().default("AVAILABLE"),
+  unavailableReason: text("unavailable_reason"),
   unitPriceCent: integer("unit_price_cent").notNull(),
   quantity: integer("quantity").notNull(),
   subtotalCent: integer("subtotal_cent").notNull(),
 }, (table) => [
   index("order_items_order_idx").on(table.orderId),
+  index("order_items_item_status_idx").on(table.itemId, table.fulfillmentStatus),
+  check("order_items_fulfillment_check", sql`${table.fulfillmentStatus} IN ('AVAILABLE', 'SOLD_OUT')`),
   check("order_items_quantity_check", sql`${table.quantity} BETWEEN 1 AND 99`),
   check("order_items_money_check", sql`${table.unitPriceCent} > 0 AND ${table.subtotalCent} > 0`),
 ]);
