@@ -45,7 +45,12 @@ test("finished product metadata and starter cleanup are present", async () => {
   assert.match(app, /const orderSubmitLockRef = useRef\(false\)/);
   assert.match(app, /const checkoutRequestIdRef = useRef<string \| null>\(null\)/);
   assert.match(app, /if \(orderSubmitLockRef\.current\) return/);
-  assert.match(app, /quote\?\.requestId \?\? checkoutRequestIdRef\.current \?\? crypto\.randomUUID\(\)/);
+  assert.match(app, /function createClientRequestId\(\)/);
+  assert.match(app, /globalThis\.crypto\?\.getRandomValues/);
+  assert.match(app, /quote\?\.requestId \?\? checkoutRequestIdRef\.current \?\? createClientRequestId\(\)/);
+  assert.match(app, /window\.setTimeout\(\(\) => controller\.abort\(\), 15_000\)/);
+  assert.match(app, /网络连接超时，请检查网络后重试/);
+  assert.match(app, /orderSubmitLockRef\.current = false/);
   assert.match(app, /disabled=\{orderSubmitting \|\| !cartLines\.length/);
   assert.match(app, /订单提交中…/);
   assert.match(app, /近一年订单记录/);

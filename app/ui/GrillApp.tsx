@@ -11,19 +11,46 @@ import {
 
 type Json = Record<string, any>;
 
-async function api(path: string, options: RequestInit = {}) {
-  const response = await fetch(path, {
-    ...options,
-    headers: { "Content-Type": "application/json", ...(options.headers ?? {}) },
-  });
-  const payload = (await response.json()) as Json;
-  if (!response.ok) {
-    const error = new Error(payload.message ?? "请求失败") as Error & { code?: string; details?: Json };
-    error.code = payload.error_code;
-    error.details = payload.details;
-    throw error;
+function createClientRequestId() {
+  try {
+    if (typeof globalThis.crypto?.randomUUID === "function") {
+      return globalThis.crypto.randomUUID();
+    }
+    if (typeof globalThis.crypto?.getRandomValues === "function") {
+      const bytes = globalThis.crypto.getRandomValues(new Uint8Array(16));
+      return `request-${Date.now().toString(36)}-${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+    }
+  } catch {
+    // Public-IP HTTP pages may expose only part of the Web Crypto API.
   }
-  return payload.data as Json;
+  return `request-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+}
+
+async function api(path: string, options: RequestInit = {}) {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), 15_000);
+  try {
+    const response = await fetch(path, {
+      ...options,
+      signal: controller.signal,
+      headers: { "Content-Type": "application/json", ...(options.headers ?? {}) },
+    });
+    const payload = (await response.json()) as Json;
+    if (!response.ok) {
+      const error = new Error(payload.message ?? "请求失败") as Error & { code?: string; details?: Json };
+      error.code = payload.error_code;
+      error.details = payload.details;
+      throw error;
+    }
+    return payload.data as Json;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error("网络连接超时，请检查网络后重试。");
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timer);
+  }
 }
 
 const money = (cent: number) => `¥${(Number(cent || 0) / 100).toFixed(2)}`;
@@ -442,9 +469,10 @@ function CustomerApp({ user, onLogout }: { user: Json; onLogout: () => void }) {
     }
     orderSubmitLockRef.current = true;
     setOrderSubmitting(true);
-    const requestId = quote?.requestId ?? checkoutRequestIdRef.current ?? crypto.randomUUID();
-    checkoutRequestIdRef.current = requestId;
+    let requestId = "";
     try {
+      requestId = quote?.requestId ?? checkoutRequestIdRef.current ?? createClientRequestId();
+      checkoutRequestIdRef.current = requestId;
       const data = await api("/api/orders", {
         method: "POST",
         body: JSON.stringify({
