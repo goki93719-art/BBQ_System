@@ -49,6 +49,43 @@ MOCK_SMS_ENABLED=true
 
 当前固定验证码 `9999` 仅用于测试版。接入真实短信前不要把 `APP_ENV` 设置为 `production`；生产模式会阻止 Mock 验证码配置。
 
+## 部署到阿里云 ECS
+
+推荐使用 Ubuntu 22.04 与 Docker Compose。项目提供 `Dockerfile` 和
+`docker-compose.yml`，数据库存放在独立 Docker 卷中，容器更新或服务器重启不会
+删除订单数据。
+
+在服务器中克隆代码并进入项目目录后，创建 `.env.production`：
+
+```dotenv
+TURSO_DATABASE_URL=file:/app/data/edison-grill.db
+CRON_SECRET=replace-with-a-random-hex-string-at-least-16-characters
+APP_ENV=demo
+MOCK_SMS_ENABLED=true
+```
+
+启动服务：
+
+```bash
+docker compose up -d --build
+docker compose ps
+curl http://127.0.0.1/api/menu
+```
+
+当前 Compose 配置将应用映射到服务器 `80` 端口。ECS 安全组应对公网开放
+TCP `80`，SSH `22` 仅对可信来源 IP 开放。接入域名后再开放 `443` 并配置
+反向代理和 HTTPS。
+
+为了保证未确认订单跨日后及时自动拒绝，将 ECS 时区设置为
+`Asia/Shanghai`，然后执行 `crontab -e` 添加：
+
+```cron
+5 0 * * * cd /opt/edison-bbq && /bin/sh scripts/expire-orders-ecs.sh >> /var/log/edison-bbq-cron.log 2>&1
+```
+
+如果项目实际存放目录不是 `/opt/edison-bbq`，替换为对应路径。顾客端和管理端
+读取订单时仍会执行相同的过期规则作为兜底。
+
 ## 演示账号
 
 | 入口 | 账号 | 密码 / 验证码 | 权限 |

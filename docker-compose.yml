@@ -1,0 +1,23 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: edison-bbq:latest
+    restart: unless-stopped
+    init: true
+    env_file:
+      - .env.production
+    ports:
+      - "80:3000"
+    volumes:
+      - edison-bbq-data:/app/data
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--spider", "http://127.0.0.1:3000/api/menu"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  edison-bbq-data:
