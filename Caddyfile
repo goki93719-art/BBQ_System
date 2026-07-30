@@ -1,0 +1,17 @@
+{$SITE_ADDRESS:http://} {
+  encode zstd gzip
+
+  reverse_proxy app:3000 {
+    transport http {
+      dial_timeout 5s
+      response_header_timeout 30s
+      keepalive 30s
+    }
+  }
+
+  header {
+    X-Content-Type-Options "nosniff"
+    Referrer-Policy "strict-origin-when-cross-origin"
+    -Server
+  }
+}

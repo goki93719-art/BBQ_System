@@ -9,7 +9,7 @@ services:
     env_file:
       - .env.production
     ports:
-      - "80:3000"
+      - "127.0.0.1:3000:3000"
     volumes:
       - edison-bbq-data:/app/data
     healthcheck:
@@ -19,5 +19,24 @@ services:
       retries: 3
       start_period: 30s
 
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    env_file:
+      - .env.production
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
 volumes:
   edison-bbq-data:
+  caddy-data:
+  caddy-config:

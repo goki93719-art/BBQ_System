@@ -19,4 +19,4 @@ fi
 
 curl --fail --silent --show-error \
   -H "Authorization: Bearer $CRON_SECRET_VALUE" \
-  "http://127.0.0.1/api/cron/expire-orders"
+  "http://127.0.0.1:3000/api/cron/expire-orders"

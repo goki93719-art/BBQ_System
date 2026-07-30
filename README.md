@@ -60,6 +60,7 @@ MOCK_SMS_ENABLED=true
 ```dotenv
 TURSO_DATABASE_URL=file:/app/data/edison-grill.db
 CRON_SECRET=replace-with-a-random-hex-string-at-least-16-characters
+SITE_ADDRESS=http://
 APP_ENV=demo
 MOCK_SMS_ENABLED=true
 ```
@@ -72,9 +73,20 @@ docker compose ps
 curl http://127.0.0.1/api/menu
 ```
 
-当前 Compose 配置将应用映射到服务器 `80` 端口。ECS 安全组应对公网开放
-TCP `80`，SSH `22` 仅对可信来源 IP 开放。接入域名后再开放 `443` 并配置
-反向代理和 HTTPS。
+当前 Compose 配置通过 Caddy 将应用发布到服务器 `80` 端口，Next.js 的
+`3000` 端口只绑定本机回环地址。ECS 安全组应对公网开放 TCP `80` 和 `443`，
+SSH `22` 仅对可信来源 IP 开放。
+
+启用可信 HTTPS 前，先将已备案域名的 A 记录解析到 ECS 公网 IP，然后把
+`.env.production` 中的配置改为：
+
+```dotenv
+SITE_ADDRESS=bbq.example.com
+```
+
+执行 `docker compose up -d --force-recreate caddy`。Caddy 会自动申请和续期证书，
+并将 HTTP 请求重定向到 HTTPS。证书与运行配置分别保存在 `caddy-data` 和
+`caddy-config` 持久化卷中。
 
 为了保证未确认订单跨日后及时自动拒绝，将 ECS 时区设置为
 `Asia/Shanghai`，然后执行 `crontab -e` 添加：
