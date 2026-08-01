@@ -788,6 +788,142 @@ function AdminLogin({ onLogin }: { onLogin: (admin: Json) => void }) {
   );
 }
 
+type NewItemInput = {
+  categoryId: string;
+  name: string;
+  sku: string;
+  priceCent: number;
+  description: string;
+  imageUrl: string;
+  sortOrder: number;
+};
+
+function ItemCreateDrawer({
+  categories,
+  defaultSortOrder,
+  onClose,
+  onSubmit,
+}: {
+  categories: Json[];
+  defaultSortOrder: number;
+  onClose: () => void;
+  onSubmit: (input: NewItemInput) => Promise<void>;
+}) {
+  const enabledCategories = categories.filter((category) => category.status === "ENABLED");
+  const [form, setForm] = useState({
+    categoryId: enabledCategories[0]?.id ?? "",
+    name: "",
+    sku: "",
+    priceYuan: "",
+    description: "",
+    imageUrl: "🔥",
+    sortOrder: String(defaultSortOrder),
+  });
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+  const nameRef = useRef<HTMLInputElement>(null);
+  const selectedCategory = categories.find((category) => category.id === form.categoryId);
+  const previewPrice = Number(form.priceYuan);
+
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    window.requestAnimationFrame(() => nameRef.current?.focus());
+    return () => { document.body.style.overflow = previousOverflow; };
+  }, []);
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !submitting) onClose();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [onClose, submitting]);
+
+  function updateField(field: keyof typeof form, value: string) {
+    setForm((current) => ({ ...current, [field]: value }));
+    if (error) setError("");
+  }
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const name = form.name.trim();
+    const sku = form.sku.trim().toUpperCase();
+    const priceCent = Math.round(Number(form.priceYuan) * 100);
+    const sortOrder = Number(form.sortOrder);
+    if (!form.categoryId) return setError("请选择商品品类。");
+    if (!name) return setError("请填写商品名称。");
+    if (!/^[A-Z0-9_-]{2,30}$/.test(sku)) return setError("SKU 需为 2–30 位英文、数字、横线或下划线。");
+    if (!Number.isInteger(priceCent) || priceCent <= 0) return setError("请输入正确的商品单价。");
+    if (!Number.isInteger(sortOrder) || sortOrder < 0 || sortOrder > 9999) return setError("排序值需为 0–9999 的整数。");
+    setSubmitting(true);
+    try {
+      await onSubmit({
+        categoryId: form.categoryId,
+        name,
+        sku,
+        priceCent,
+        description: form.description.trim(),
+        imageUrl: form.imageUrl.trim() || "🔥",
+        sortOrder,
+      });
+      onClose();
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : "新增商品失败，请稍后重试。");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="admin-form-backdrop" onClick={() => !submitting && onClose()}>
+      <aside className="admin-form-drawer" role="dialog" aria-modal="true" aria-labelledby="item-create-title" onClick={(event) => event.stopPropagation()}>
+        <header>
+          <div><p className="eyebrow">NEW MENU ITEM</p><h2 id="item-create-title">新增商品</h2><p>填写商品资料，保存后立即进入菜单管理列表。</p></div>
+          <button type="button" aria-label="关闭新增商品表单" disabled={submitting} onClick={onClose}>×</button>
+        </header>
+        <form onSubmit={submit} noValidate>
+          <div className="admin-form-body">
+            <div className="item-form-preview" aria-label="商品预览">
+              <span>{form.imageUrl.trim() || "🔥"}</span>
+              <div><small>{selectedCategory?.name ?? "待选择品类"}</small><strong>{form.name.trim() || "商品名称"}</strong><b>{previewPrice > 0 ? money(Math.round(previewPrice * 100)) : "¥0.00"}</b></div>
+            </div>
+            <div className="admin-form-grid">
+              <label className="admin-form-field admin-form-field-wide">商品名称<span>必填</span>
+                <input ref={nameRef} value={form.name} maxLength={40} placeholder="例如：秘制五花肉串" onChange={(event) => updateField("name", event.target.value)} />
+              </label>
+              <label className="admin-form-field">品类<span>必填</span>
+                <select value={form.categoryId} onChange={(event) => updateField("categoryId", event.target.value)}>
+                  {enabledCategories.map((category) => <option value={category.id} key={category.id}>{category.name}</option>)}
+                </select>
+              </label>
+              <label className="admin-form-field">商品图标<span>建议使用 Emoji</span>
+                <input value={form.imageUrl} maxLength={12} placeholder="🔥" onChange={(event) => updateField("imageUrl", event.target.value)} />
+              </label>
+              <label className="admin-form-field">SKU<span>唯一编码</span>
+                <input value={form.sku} maxLength={30} autoCapitalize="characters" spellCheck={false} placeholder="例如：SK-025" onChange={(event) => updateField("sku", event.target.value.toUpperCase())} />
+              </label>
+              <label className="admin-form-field">单价（元）<span>必填</span>
+                <div className="price-input"><i>¥</i><input type="number" inputMode="decimal" min="0.01" max="99999" step="0.01" value={form.priceYuan} placeholder="18.00" onChange={(event) => updateField("priceYuan", event.target.value)} /></div>
+              </label>
+              <label className="admin-form-field admin-form-field-wide">商品描述<span>{form.description.length}/300</span>
+                <textarea value={form.description} maxLength={300} rows={4} placeholder="简单描述口味、食材或推荐理由" onChange={(event) => updateField("description", event.target.value)} />
+              </label>
+              <label className="admin-form-field">列表排序<span>数字越小越靠前</span>
+                <input type="number" inputMode="numeric" min="0" max="9999" step="1" value={form.sortOrder} onChange={(event) => updateField("sortOrder", event.target.value)} />
+              </label>
+            </div>
+            {error && <p className="admin-form-error" role="alert">{error}</p>}
+          </div>
+          <footer>
+            <button type="button" className="ghost-button" disabled={submitting} onClick={onClose}>取消</button>
+            <button type="submit" className="primary-button" disabled={submitting || enabledCategories.length === 0}>{submitting ? "保存中…" : "保存并上架"}</button>
+          </footer>
+        </form>
+      </aside>
+    </div>
+  );
+}
+
 function AdminApp({ admin, onLogout }: { admin: Json; onLogout: () => void }) {
   const [tab, setTab] = useState<"orders" | "menu" | "analytics" | "audit">("orders");
   const [pendingOrders, setPendingOrders] = useState<Json[]>([]);
@@ -804,6 +940,7 @@ function AdminApp({ admin, onLogout }: { admin: Json; onLogout: () => void }) {
   const [analyticsYear, setAnalyticsYear] = useState(defaultAnalyticsYear);
   const [analyticsMonth, setAnalyticsMonth] = useState(defaultAnalyticsMonth);
   const [message, setMessage] = useState("");
+  const [itemFormOpen, setItemFormOpen] = useState(false);
   const manager = admin.role === "MANAGER";
   const dismissMessage = useCallback(() => setMessage(""), []);
 
@@ -907,14 +1044,17 @@ function AdminApp({ admin, onLogout }: { admin: Json; onLogout: () => void }) {
     try { await api("/api/admin/categories", { method: "POST", body: JSON.stringify({ name, code, businessType: "FOOD" }) }); await loadMenu(); }
     catch (error) { setMessage(error instanceof Error ? error.message : "新增失败"); }
   }
-  async function addItem() {
-    const categoryId = categories[0]?.id;
-    const name = window.prompt("商品名称");
-    const sku = window.prompt("SKU");
-    const yuan = window.prompt("价格（元）", "18");
-    if (!categoryId || !name || !sku || !yuan) return;
-    try { await api("/api/admin/items", { method: "POST", body: JSON.stringify({ categoryId, name, sku, priceCent: Math.round(Number(yuan) * 100), description: "门店新上架商品" }) }); await loadMenu(); }
-    catch (error) { setMessage(error instanceof Error ? error.message : "新增失败"); }
+  function openItemForm() {
+    if (!categories.some((category) => category.status === "ENABLED")) {
+      setMessage("请先新增并启用一个品类，再添加商品。");
+      return;
+    }
+    setItemFormOpen(true);
+  }
+  async function createItem(input: NewItemInput) {
+    await api("/api/admin/items", { method: "POST", body: JSON.stringify(input) });
+    await loadMenu();
+    setMessage(`${input.name} 已新增并上架`);
   }
   async function logout() { await api("/api/admin/auth/logout", { method: "POST", body: "{}" }); onLogout(); }
 
@@ -963,7 +1103,7 @@ function AdminApp({ admin, onLogout }: { admin: Json; onLogout: () => void }) {
         </>}
 
         {tab === "menu" && <>
-          <div className="admin-title"><div><p className="eyebrow">MENU CONTROL</p><h1>菜单管理</h1><p>店长操作会写入审计日志，历史订单始终保留快照。</p></div>{manager && <span className="button-row"><button className="ghost-button" onClick={addCategory}>新增品类</button><button className="primary-button" onClick={addItem}>新增商品</button></span>}</div>
+          <div className="admin-title"><div><p className="eyebrow">MENU CONTROL</p><h1>菜单管理</h1><p>店长操作会写入审计日志，历史订单始终保留快照。</p></div>{manager && <span className="button-row"><button className="ghost-button" onClick={addCategory}>新增品类</button><button className="primary-button" onClick={openItemForm}>新增商品</button></span>}</div>
           <section className="admin-panel"><header><h2>品类</h2><span>{categories.length} 个品类</span></header><div className="category-admin-grid">{categories.map((category) => <div key={category.id}><span className="category-icon">{category.name.slice(0, 1)}</span><span><strong>{category.name}</strong><small>{category.code} · V{category.version}</small></span><button aria-label={`${category.status === "ENABLED" ? "停用" : "启用"}品类${category.name}`} aria-pressed={category.status === "ENABLED"} disabled={!manager} onClick={() => toggleCategory(category)} className={category.status === "ENABLED" ? "switch on" : "switch"}><i /></button></div>)}</div></section>
           <section className="admin-panel compact-table product-table">
             <header><h2>商品</h2><span>{items.length} 道在库商品</span></header>
@@ -1006,6 +1146,7 @@ function AdminApp({ admin, onLogout }: { admin: Json; onLogout: () => void }) {
 
         {tab === "audit" && <><div className="admin-title"><div><p className="eyebrow">AUDIT TRAIL</p><h1>审计日志</h1><p>管理写操作与订单状态变化不可物理删除。</p></div><button className="ghost-button" onClick={loadAudits}>刷新</button></div><section className="admin-panel compact-table audit-table">{audits.map((log) => <div className="table-row" key={log.id}><span><b>{log.action}</b><small>{log.entity_type} · {log.entity_id.slice(0, 12)}</small></span><span>{log.actor_name}<small>{log.actor_type}</small></span><span>{log.reason || "—"}</span><time>{dateTime(log.created_at)}</time></div>)}</section></>}
       </main>
+      {itemFormOpen && <ItemCreateDrawer categories={categories} defaultSortOrder={Math.min(9999, Math.max(10, ...items.map((item) => Number(item.sort_order ?? 0))) + 10)} onClose={() => setItemFormOpen(false)} onSubmit={createItem} />}
       <Toast message={message} onDismiss={dismissMessage} />
     </div>
   );

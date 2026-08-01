@@ -36,6 +36,11 @@ test("finished product metadata and starter cleanup are present", async () => {
   assert.match(app, /上下架操作/);
   assert.match(app, /库存操作/);
   assert.match(app, /menu-category-cell/);
+  assert.match(app, /ItemCreateDrawer/);
+  assert.match(app, /role="dialog" aria-modal="true" aria-labelledby="item-create-title"/);
+  assert.match(app, /保存并上架/);
+  assert.match(app, /商品描述/);
+  assert.doesNotMatch(app, /window\.prompt\("商品名称"\)/);
   assert.match(app, /window\.setTimeout\(onDismiss, 3000\)/);
   assert.doesNotMatch(app, /setMessage\(""\), 1500/);
   assert.match(app, /event\.key !== "Escape"/);
@@ -78,6 +83,9 @@ test("finished product metadata and starter cleanup are present", async () => {
   assert.match(styles, /\.food-copy footer strong \{[^}]*font-size: 28px;/);
   assert.match(styles, /\.inventory-action\.available/);
   assert.match(styles, /\.inventory-action\.sold-out/);
+  assert.match(styles, /\.admin-form-drawer/);
+  assert.match(styles, /\.admin-form-grid/);
+  assert.match(styles, /\.item-form-preview/);
   assert.match(styles, /\.cart-line\.invalid .cart-icon/);
   assert.doesNotMatch(`${layout}\n${page}\n${packageJson}`, /codex-preview|react-loading-skeleton|SkeletonPreview/);
   const packageConfig = JSON.parse(packageJson);
