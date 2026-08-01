@@ -374,10 +374,14 @@ h1, h2, h3, p { margin-top: 0; }
 .admin-form-field > select { padding-right: 36px; }
 .admin-form-field > textarea { min-height: 98px; padding: 12px 13px; resize: vertical; line-height: 1.6; }
 .admin-form-field > input:focus, .admin-form-field > select:focus, .admin-form-field > textarea:focus, .price-input:focus-within { border-color: var(--fire); box-shadow: 0 0 0 3px rgba(217,80,50,.1); }
+.admin-form-field.has-error > input, .admin-form-field.has-error > select, .admin-form-field.has-error > textarea, .admin-form-field.has-error .price-input { border-color: #d95032; background: #fffafa; box-shadow: 0 0 0 3px rgba(217,80,50,.08); }
+.admin-field-error { grid-column: 1 / -1; margin-top: -2px; color: #bd3e29 !important; font-size: 11px !important; font-weight: 700 !important; line-height: 1.45; }
 .price-input { display: grid; min-height: 48px; grid-template-columns: 34px minmax(0, 1fr); align-items: center; overflow: hidden; }
 .price-input i { color: var(--fire-dark); font-size: 17px; font-style: normal; font-weight: 800; text-align: right; }
 .price-input input { width: 100%; min-width: 0; height: 100%; padding: 0 13px 0 8px; border: 0; outline: 0; background: transparent; color: var(--ink); font-size: 14px; }
 .admin-form-error { margin: 18px 0 0; padding: 11px 13px; border: 1px solid #e6b3a9; border-radius: 10px; background: #fff0ec; color: var(--fire-dark); font-size: 12px; line-height: 1.55; }
+.category-form-preview > span { color: #684632; font-family: Georgia, "Songti SC", serif; font-size: 32px; font-weight: 800; }
+.category-form-preview b { color: #786650; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; letter-spacing: .04em; }
 .admin-form-drawer > form > footer { display: flex; padding: 18px 36px calc(18px + env(safe-area-inset-bottom)); justify-content: end; gap: 10px; border-top: 1px solid var(--line); background: rgba(255,253,248,.96); box-shadow: 0 -10px 28px rgba(36,29,20,.05); }
 .admin-form-drawer > form > footer button { min-width: 116px; }
 .analytics-filters { display: flex; width: fit-content; margin: 12px 0 24px; padding: 12px; align-items: end; gap: 12px; border: 1px solid var(--line); border-radius: 13px; background: #e8e2d7; }

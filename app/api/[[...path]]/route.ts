@@ -872,11 +872,15 @@ async function adminMenu(db: AppDatabase, request: Request, segments: string[]) 
   if (resource === "categories" && request.method === "POST") {
     const name = String(body.name ?? "").trim();
     const code = String(body.code ?? "").trim().toUpperCase();
+    const businessType = String(body.businessType ?? "FOOD").toUpperCase();
+    const sortOrder = Number(body.sortOrder ?? 50);
     if (!name || name.length > 20 || !/^[A-Z0-9_]{2,30}$/.test(code)) throw new ApiError(400, "INVALID_CATEGORY", "品类名称或编码格式不正确。");
+    if (!["FOOD", "BEER", "DRINK"].includes(businessType)) throw new ApiError(400, "INVALID_CATEGORY_TYPE", "品类业务类型不正确。");
+    if (!Number.isInteger(sortOrder) || sortOrder < 0 || sortOrder > 9999) throw new ApiError(400, "INVALID_CATEGORY_SORT", "品类排序值需为 0–9999 的整数。");
     const categoryId = crypto.randomUUID();
     try {
       await db.batch([
-        db.prepare("INSERT INTO categories VALUES (?, ?, ?, ?, ?, 'ENABLED', '[]', ?, 1, ?, ?)").bind(categoryId, STORE_ID, name, code, String(body.businessType ?? "FOOD"), Number(body.sortOrder ?? 50), now, now),
+        db.prepare("INSERT INTO categories VALUES (?, ?, ?, ?, ?, 'ENABLED', '[]', ?, 1, ?, ?)").bind(categoryId, STORE_ID, name, code, businessType, sortOrder, now, now),
         db.prepare("INSERT INTO audit_logs VALUES (?, ?, 'ADMIN', ?, 'CATEGORY_CREATE', 'CATEGORY', ?, NULL, ?, '', ?, ?)").bind(crypto.randomUUID(), STORE_ID, admin.id, categoryId, JSON.stringify({ name, code }), `category:${categoryId}:create`, now),
       ]);
     } catch {

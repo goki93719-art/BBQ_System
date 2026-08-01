@@ -798,6 +798,25 @@ type NewItemInput = {
   sortOrder: number;
 };
 
+type ItemFormField = "categoryId" | "name" | "sku" | "priceYuan" | "sortOrder";
+type ItemFormErrors = Partial<Record<ItemFormField, string>>;
+
+type NewCategoryInput = {
+  name: string;
+  code: string;
+  businessType: "FOOD" | "BEER" | "DRINK";
+  sortOrder: number;
+};
+
+type CategoryFormField = "name" | "code" | "businessType" | "sortOrder";
+type CategoryFormErrors = Partial<Record<CategoryFormField, string>>;
+
+const businessTypeLabels: Record<NewCategoryInput["businessType"], string> = {
+  FOOD: "餐食",
+  BEER: "啤酒",
+  DRINK: "饮料",
+};
+
 function ItemCreateDrawer({
   categories,
   defaultSortOrder,
@@ -821,7 +840,12 @@ function ItemCreateDrawer({
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<ItemFormErrors>({});
   const nameRef = useRef<HTMLInputElement>(null);
+  const categoryRef = useRef<HTMLSelectElement>(null);
+  const skuRef = useRef<HTMLInputElement>(null);
+  const priceRef = useRef<HTMLInputElement>(null);
+  const sortOrderRef = useRef<HTMLInputElement>(null);
   const selectedCategory = categories.find((category) => category.id === form.categoryId);
   const previewPrice = Number(form.priceYuan);
 
@@ -841,7 +865,29 @@ function ItemCreateDrawer({
 
   function updateField(field: keyof typeof form, value: string) {
     setForm((current) => ({ ...current, [field]: value }));
+    if (field in fieldErrors) {
+      setFieldErrors((current) => {
+        const next = { ...current };
+        delete next[field as ItemFormField];
+        return next;
+      });
+    }
     if (error) setError("");
+  }
+
+  function showValidationErrors(errors: ItemFormErrors) {
+    const order: ItemFormField[] = ["name", "categoryId", "sku", "priceYuan", "sortOrder"];
+    const invalidFields = order.filter((field) => errors[field]);
+    const refs: Record<ItemFormField, { current: HTMLInputElement | HTMLSelectElement | null }> = {
+      name: nameRef,
+      categoryId: categoryRef,
+      sku: skuRef,
+      priceYuan: priceRef,
+      sortOrder: sortOrderRef,
+    };
+    setFieldErrors(errors);
+    setError(invalidFields.length > 1 ? `请检查并完善 ${invalidFields.length} 项商品信息。` : errors[invalidFields[0]] ?? "请完善商品信息。");
+    window.requestAnimationFrame(() => refs[invalidFields[0]]?.current?.focus());
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -850,11 +896,15 @@ function ItemCreateDrawer({
     const sku = form.sku.trim().toUpperCase();
     const priceCent = Math.round(Number(form.priceYuan) * 100);
     const sortOrder = Number(form.sortOrder);
-    if (!form.categoryId) return setError("请选择商品品类。");
-    if (!name) return setError("请填写商品名称。");
-    if (!/^[A-Z0-9_-]{2,30}$/.test(sku)) return setError("SKU 需为 2–30 位英文、数字、横线或下划线。");
-    if (!Number.isInteger(priceCent) || priceCent <= 0) return setError("请输入正确的商品单价。");
-    if (!Number.isInteger(sortOrder) || sortOrder < 0 || sortOrder > 9999) return setError("排序值需为 0–9999 的整数。");
+    const errors: ItemFormErrors = {};
+    if (!name) errors.name = "请填写商品名称。";
+    if (!form.categoryId) errors.categoryId = "请选择商品品类。";
+    if (!sku) errors.sku = "请填写 SKU 唯一编码。";
+    else if (!/^[A-Z0-9_-]{2,30}$/.test(sku)) errors.sku = "SKU 需为 2–30 位英文、数字、横线或下划线。";
+    if (!form.priceYuan.trim()) errors.priceYuan = "请填写商品单价。";
+    else if (!Number.isInteger(priceCent) || priceCent <= 0) errors.priceYuan = "请输入大于 0 的正确商品单价。";
+    if (!Number.isInteger(sortOrder) || sortOrder < 0 || sortOrder > 9999) errors.sortOrder = "排序值需为 0–9999 的整数。";
+    if (Object.keys(errors).length) return showValidationErrors(errors);
     setSubmitting(true);
     try {
       await onSubmit({
@@ -888,28 +938,33 @@ function ItemCreateDrawer({
               <div><small>{selectedCategory?.name ?? "待选择品类"}</small><strong>{form.name.trim() || "商品名称"}</strong><b>{previewPrice > 0 ? money(Math.round(previewPrice * 100)) : "¥0.00"}</b></div>
             </div>
             <div className="admin-form-grid">
-              <label className="admin-form-field admin-form-field-wide">商品名称<span>必填</span>
-                <input ref={nameRef} value={form.name} maxLength={40} placeholder="例如：秘制五花肉串" onChange={(event) => updateField("name", event.target.value)} />
+              <label className={`admin-form-field admin-form-field-wide ${fieldErrors.name ? "has-error" : ""}`}>商品名称<span>必填</span>
+                <input ref={nameRef} value={form.name} maxLength={40} aria-invalid={Boolean(fieldErrors.name)} aria-describedby={fieldErrors.name ? "item-name-error" : undefined} placeholder="例如：秘制五花肉串" onChange={(event) => updateField("name", event.target.value)} />
+                {fieldErrors.name && <small className="admin-field-error" id="item-name-error">{fieldErrors.name}</small>}
               </label>
-              <label className="admin-form-field">品类<span>必填</span>
-                <select value={form.categoryId} onChange={(event) => updateField("categoryId", event.target.value)}>
+              <label className={`admin-form-field ${fieldErrors.categoryId ? "has-error" : ""}`}>品类<span>必填</span>
+                <select ref={categoryRef} value={form.categoryId} aria-invalid={Boolean(fieldErrors.categoryId)} aria-describedby={fieldErrors.categoryId ? "item-category-error" : undefined} onChange={(event) => updateField("categoryId", event.target.value)}>
                   {enabledCategories.map((category) => <option value={category.id} key={category.id}>{category.name}</option>)}
                 </select>
+                {fieldErrors.categoryId && <small className="admin-field-error" id="item-category-error">{fieldErrors.categoryId}</small>}
               </label>
               <label className="admin-form-field">商品图标<span>建议使用 Emoji</span>
                 <input value={form.imageUrl} maxLength={12} placeholder="🔥" onChange={(event) => updateField("imageUrl", event.target.value)} />
               </label>
-              <label className="admin-form-field">SKU<span>唯一编码</span>
-                <input value={form.sku} maxLength={30} autoCapitalize="characters" spellCheck={false} placeholder="例如：SK-025" onChange={(event) => updateField("sku", event.target.value.toUpperCase())} />
+              <label className={`admin-form-field ${fieldErrors.sku ? "has-error" : ""}`}>SKU<span>必填 · 唯一编码</span>
+                <input ref={skuRef} value={form.sku} maxLength={30} autoCapitalize="characters" spellCheck={false} aria-invalid={Boolean(fieldErrors.sku)} aria-describedby={fieldErrors.sku ? "item-sku-error" : undefined} placeholder="例如：SK-025" onChange={(event) => updateField("sku", event.target.value.toUpperCase())} />
+                {fieldErrors.sku && <small className="admin-field-error" id="item-sku-error">{fieldErrors.sku}</small>}
               </label>
-              <label className="admin-form-field">单价（元）<span>必填</span>
-                <div className="price-input"><i>¥</i><input type="number" inputMode="decimal" min="0.01" max="99999" step="0.01" value={form.priceYuan} placeholder="18.00" onChange={(event) => updateField("priceYuan", event.target.value)} /></div>
+              <label className={`admin-form-field ${fieldErrors.priceYuan ? "has-error" : ""}`}>单价（元）<span>必填</span>
+                <div className="price-input"><i>¥</i><input ref={priceRef} type="number" inputMode="decimal" min="0.01" max="99999" step="0.01" value={form.priceYuan} aria-invalid={Boolean(fieldErrors.priceYuan)} aria-describedby={fieldErrors.priceYuan ? "item-price-error" : undefined} placeholder="18.00" onChange={(event) => updateField("priceYuan", event.target.value)} /></div>
+                {fieldErrors.priceYuan && <small className="admin-field-error" id="item-price-error">{fieldErrors.priceYuan}</small>}
               </label>
               <label className="admin-form-field admin-form-field-wide">商品描述<span>{form.description.length}/300</span>
                 <textarea value={form.description} maxLength={300} rows={4} placeholder="简单描述口味、食材或推荐理由" onChange={(event) => updateField("description", event.target.value)} />
               </label>
-              <label className="admin-form-field">列表排序<span>数字越小越靠前</span>
-                <input type="number" inputMode="numeric" min="0" max="9999" step="1" value={form.sortOrder} onChange={(event) => updateField("sortOrder", event.target.value)} />
+              <label className={`admin-form-field ${fieldErrors.sortOrder ? "has-error" : ""}`}>列表排序<span>数字越小越靠前</span>
+                <input ref={sortOrderRef} type="number" inputMode="numeric" min="0" max="9999" step="1" value={form.sortOrder} aria-invalid={Boolean(fieldErrors.sortOrder)} aria-describedby={fieldErrors.sortOrder ? "item-sort-error" : undefined} onChange={(event) => updateField("sortOrder", event.target.value)} />
+                {fieldErrors.sortOrder && <small className="admin-field-error" id="item-sort-error">{fieldErrors.sortOrder}</small>}
               </label>
             </div>
             {error && <p className="admin-form-error" role="alert">{error}</p>}
@@ -917,6 +972,138 @@ function ItemCreateDrawer({
           <footer>
             <button type="button" className="ghost-button" disabled={submitting} onClick={onClose}>取消</button>
             <button type="submit" className="primary-button" disabled={submitting || enabledCategories.length === 0}>{submitting ? "保存中…" : "保存并上架"}</button>
+          </footer>
+        </form>
+      </aside>
+    </div>
+  );
+}
+
+function CategoryCreateDrawer({
+  defaultSortOrder,
+  onClose,
+  onSubmit,
+}: {
+  defaultSortOrder: number;
+  onClose: () => void;
+  onSubmit: (input: NewCategoryInput) => Promise<void>;
+}) {
+  const [form, setForm] = useState({
+    name: "",
+    code: "",
+    businessType: "FOOD" as NewCategoryInput["businessType"],
+    sortOrder: String(defaultSortOrder),
+  });
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<CategoryFormErrors>({});
+  const nameRef = useRef<HTMLInputElement>(null);
+  const codeRef = useRef<HTMLInputElement>(null);
+  const businessTypeRef = useRef<HTMLSelectElement>(null);
+  const sortOrderRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    window.requestAnimationFrame(() => nameRef.current?.focus());
+    return () => { document.body.style.overflow = previousOverflow; };
+  }, []);
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !submitting) onClose();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [onClose, submitting]);
+
+  function updateField(field: keyof typeof form, value: string) {
+    setForm((current) => ({ ...current, [field]: value }));
+    if (field in fieldErrors) {
+      setFieldErrors((current) => {
+        const next = { ...current };
+        delete next[field as CategoryFormField];
+        return next;
+      });
+    }
+    if (error) setError("");
+  }
+
+  function showValidationErrors(errors: CategoryFormErrors) {
+    const order: CategoryFormField[] = ["name", "code", "businessType", "sortOrder"];
+    const invalidFields = order.filter((field) => errors[field]);
+    const refs: Record<CategoryFormField, { current: HTMLInputElement | HTMLSelectElement | null }> = {
+      name: nameRef,
+      code: codeRef,
+      businessType: businessTypeRef,
+      sortOrder: sortOrderRef,
+    };
+    setFieldErrors(errors);
+    setError(invalidFields.length > 1 ? `请检查并完善 ${invalidFields.length} 项品类信息。` : errors[invalidFields[0]] ?? "请完善品类信息。");
+    window.requestAnimationFrame(() => refs[invalidFields[0]]?.current?.focus());
+  }
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const name = form.name.trim();
+    const code = form.code.trim().toUpperCase();
+    const sortOrder = Number(form.sortOrder);
+    const errors: CategoryFormErrors = {};
+    if (!name) errors.name = "请填写品类名称。";
+    else if (name.length > 20) errors.name = "品类名称不能超过 20 个字符。";
+    if (!code) errors.code = "请填写品类编码。";
+    else if (!/^[A-Z0-9_]{2,30}$/.test(code)) errors.code = "品类编码需为 2–30 位英文、数字或下划线。";
+    if (!businessTypeLabels[form.businessType]) errors.businessType = "请选择业务类型。";
+    if (!Number.isInteger(sortOrder) || sortOrder < 0 || sortOrder > 9999) errors.sortOrder = "排序值需为 0–9999 的整数。";
+    if (Object.keys(errors).length) return showValidationErrors(errors);
+    setSubmitting(true);
+    try {
+      await onSubmit({ name, code, businessType: form.businessType, sortOrder });
+      onClose();
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : "新增品类失败，请稍后重试。");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="admin-form-backdrop" onClick={() => !submitting && onClose()}>
+      <aside className="admin-form-drawer" role="dialog" aria-modal="true" aria-labelledby="category-create-title" onClick={(event) => event.stopPropagation()}>
+        <header>
+          <div><p className="eyebrow">NEW CATEGORY</p><h2 id="category-create-title">新增品类</h2><p>建立新的菜单分组，保存后默认启用并立即展示。</p></div>
+          <button type="button" aria-label="关闭新增品类表单" disabled={submitting} onClick={onClose}>×</button>
+        </header>
+        <form onSubmit={submit} noValidate>
+          <div className="admin-form-body">
+            <div className="item-form-preview category-form-preview" aria-label="品类预览">
+              <span>{form.name.trim().slice(0, 1) || "品"}</span>
+              <div><small>{businessTypeLabels[form.businessType]}</small><strong>{form.name.trim() || "品类名称"}</strong><b>{form.code.trim().toUpperCase() || "CATEGORY_CODE"}</b></div>
+            </div>
+            <div className="admin-form-grid">
+              <label className={`admin-form-field admin-form-field-wide ${fieldErrors.name ? "has-error" : ""}`}>品类名称<span>必填</span>
+                <input ref={nameRef} value={form.name} maxLength={20} aria-invalid={Boolean(fieldErrors.name)} aria-describedby={fieldErrors.name ? "category-name-error" : undefined} placeholder="例如：特色小炒" onChange={(event) => updateField("name", event.target.value)} />
+                {fieldErrors.name && <small className="admin-field-error" id="category-name-error">{fieldErrors.name}</small>}
+              </label>
+              <label className={`admin-form-field admin-form-field-wide ${fieldErrors.code ? "has-error" : ""}`}>品类编码<span>必填 · 唯一编码</span>
+                <input ref={codeRef} value={form.code} maxLength={30} autoCapitalize="characters" spellCheck={false} aria-invalid={Boolean(fieldErrors.code)} aria-describedby={fieldErrors.code ? "category-code-error" : undefined} placeholder="例如：SPECIAL_DISH" onChange={(event) => updateField("code", event.target.value.toUpperCase().replace(/\s+/g, "_"))} />
+                {fieldErrors.code && <small className="admin-field-error" id="category-code-error">{fieldErrors.code}</small>}
+              </label>
+              <label className={`admin-form-field ${fieldErrors.businessType ? "has-error" : ""}`}>业务类型<span>必填</span>
+                <select ref={businessTypeRef} value={form.businessType} aria-invalid={Boolean(fieldErrors.businessType)} aria-describedby={fieldErrors.businessType ? "category-type-error" : undefined} onChange={(event) => updateField("businessType", event.target.value)}>
+                  {Object.entries(businessTypeLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}
+                </select>
+                {fieldErrors.businessType && <small className="admin-field-error" id="category-type-error">{fieldErrors.businessType}</small>}
+              </label>
+              <label className={`admin-form-field ${fieldErrors.sortOrder ? "has-error" : ""}`}>列表排序<span>数字越小越靠前</span>
+                <input ref={sortOrderRef} type="number" inputMode="numeric" min="0" max="9999" step="1" value={form.sortOrder} aria-invalid={Boolean(fieldErrors.sortOrder)} aria-describedby={fieldErrors.sortOrder ? "category-sort-error" : undefined} onChange={(event) => updateField("sortOrder", event.target.value)} />
+                {fieldErrors.sortOrder && <small className="admin-field-error" id="category-sort-error">{fieldErrors.sortOrder}</small>}
+              </label>
+            </div>
+            {error && <p className="admin-form-error" role="alert">{error}</p>}
+          </div>
+          <footer>
+            <button type="button" className="ghost-button" disabled={submitting} onClick={onClose}>取消</button>
+            <button type="submit" className="primary-button" disabled={submitting}>{submitting ? "保存中…" : "保存并启用"}</button>
           </footer>
         </form>
       </aside>
@@ -941,6 +1128,7 @@ function AdminApp({ admin, onLogout }: { admin: Json; onLogout: () => void }) {
   const [analyticsMonth, setAnalyticsMonth] = useState(defaultAnalyticsMonth);
   const [message, setMessage] = useState("");
   const [itemFormOpen, setItemFormOpen] = useState(false);
+  const [categoryFormOpen, setCategoryFormOpen] = useState(false);
   const manager = admin.role === "MANAGER";
   const dismissMessage = useCallback(() => setMessage(""), []);
 
@@ -1037,12 +1225,10 @@ function AdminApp({ admin, onLogout }: { admin: Json; onLogout: () => void }) {
       await Promise.all([loadMenu(), loadOrders()]);
     }
   }
-  async function addCategory() {
-    const name = window.prompt("品类名称");
-    const code = window.prompt("品类编码（英文/数字/下划线）");
-    if (!name || !code) return;
-    try { await api("/api/admin/categories", { method: "POST", body: JSON.stringify({ name, code, businessType: "FOOD" }) }); await loadMenu(); }
-    catch (error) { setMessage(error instanceof Error ? error.message : "新增失败"); }
+  async function createCategory(input: NewCategoryInput) {
+    await api("/api/admin/categories", { method: "POST", body: JSON.stringify(input) });
+    await loadMenu();
+    setMessage(`${input.name} 品类已新增并启用`);
   }
   function openItemForm() {
     if (!categories.some((category) => category.status === "ENABLED")) {
@@ -1103,7 +1289,7 @@ function AdminApp({ admin, onLogout }: { admin: Json; onLogout: () => void }) {
         </>}
 
         {tab === "menu" && <>
-          <div className="admin-title"><div><p className="eyebrow">MENU CONTROL</p><h1>菜单管理</h1><p>店长操作会写入审计日志，历史订单始终保留快照。</p></div>{manager && <span className="button-row"><button className="ghost-button" onClick={addCategory}>新增品类</button><button className="primary-button" onClick={openItemForm}>新增商品</button></span>}</div>
+          <div className="admin-title"><div><p className="eyebrow">MENU CONTROL</p><h1>菜单管理</h1><p>店长操作会写入审计日志，历史订单始终保留快照。</p></div>{manager && <span className="button-row"><button className="ghost-button" onClick={() => setCategoryFormOpen(true)}>新增品类</button><button className="primary-button" onClick={openItemForm}>新增商品</button></span>}</div>
           <section className="admin-panel"><header><h2>品类</h2><span>{categories.length} 个品类</span></header><div className="category-admin-grid">{categories.map((category) => <div key={category.id}><span className="category-icon">{category.name.slice(0, 1)}</span><span><strong>{category.name}</strong><small>{category.code} · V{category.version}</small></span><button aria-label={`${category.status === "ENABLED" ? "停用" : "启用"}品类${category.name}`} aria-pressed={category.status === "ENABLED"} disabled={!manager} onClick={() => toggleCategory(category)} className={category.status === "ENABLED" ? "switch on" : "switch"}><i /></button></div>)}</div></section>
           <section className="admin-panel compact-table product-table">
             <header><h2>商品</h2><span>{items.length} 道在库商品</span></header>
@@ -1146,6 +1332,7 @@ function AdminApp({ admin, onLogout }: { admin: Json; onLogout: () => void }) {
 
         {tab === "audit" && <><div className="admin-title"><div><p className="eyebrow">AUDIT TRAIL</p><h1>审计日志</h1><p>管理写操作与订单状态变化不可物理删除。</p></div><button className="ghost-button" onClick={loadAudits}>刷新</button></div><section className="admin-panel compact-table audit-table">{audits.map((log) => <div className="table-row" key={log.id}><span><b>{log.action}</b><small>{log.entity_type} · {log.entity_id.slice(0, 12)}</small></span><span>{log.actor_name}<small>{log.actor_type}</small></span><span>{log.reason || "—"}</span><time>{dateTime(log.created_at)}</time></div>)}</section></>}
       </main>
+      {categoryFormOpen && <CategoryCreateDrawer defaultSortOrder={Math.min(9999, Math.max(10, ...categories.map((category) => Number(category.sort_order ?? 0))) + 10)} onClose={() => setCategoryFormOpen(false)} onSubmit={createCategory} />}
       {itemFormOpen && <ItemCreateDrawer categories={categories} defaultSortOrder={Math.min(9999, Math.max(10, ...items.map((item) => Number(item.sort_order ?? 0))) + 10)} onClose={() => setItemFormOpen(false)} onSubmit={createItem} />}
       <Toast message={message} onDismiss={dismissMessage} />
     </div>
